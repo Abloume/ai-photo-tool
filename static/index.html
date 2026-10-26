@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>自动滤镜 · 摄影师级一键调色</title>
+    <title>AI 修图工具 · 滤镜 + 智能优化 + AI 抠图</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -248,20 +248,282 @@
             line-height: 1.3;
         }
 
+        /* 滤镜强度滑块 */
+        .intensity-control {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .intensity-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #1d1d1f;
+            font-weight: 500;
+        }
+        .intensity-value {
+            color: #0071e3;
+            font-weight: 600;
+            font-size: 13px;
+        }
+        .intensity-control input[type="range"] {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #e5e5e7;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        .intensity-control input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #0071e3;
+            cursor: pointer;
+            box-shadow: 0 1px 4px rgba(0,113,227,0.3);
+        }
+
+        /* 上传区（紧凑版） */
+        .upload-zone.compact {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px 24px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .upload-zone.compact:hover, .upload-zone.compact.dragover {
+            border-color: #0071e3;
+            background: #f0f7ff;
+        }
+        .upload-icon {
+            font-size: 28px;
+        }
+        .upload-text {
+            flex: 1;
+        }
+        .upload-title {
+            font-size: 15px;
+            font-weight: 500;
+            color: #1d1d1f;
+            margin-bottom: 4px;
+        }
+        .upload-hint {
+            font-size: 12px;
+            color: #86868b;
+        }
+        .upload-arrow {
+            font-size: 20px;
+            color: #c7c7cc;
+        }
+
+        /* 主区域：左右分栏 */
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1fr 360px;
+            gap: 16px;
+            margin-top: 16px;
+        }
+        .container {
+            max-width: none;
+            padding: 0 40px;
+        }
+        .left-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .right-panel {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        /* 功能标签切换 */
+        .func-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 16px;
+            background: #f5f5f7;
+            padding: 4px;
+            border-radius: 10px;
+        }
+        .func-tab {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            background: transparent;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            color: #636366;
+            transition: all 0.2s;
+        }
+        .func-tab.active {
+            background: #fff;
+            color: #1d1d1f;
+            font-weight: 500;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        /* 底部栏：强度 + 下载 */
+        .bottom-bar {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            background: #fff;
+            padding: 12px 16px;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .intensity-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+            font-size: 13px;
+            color: #636366;
+        }
+        .intensity-control input[type="range"] {
+            flex: 1;
+            height: 4px;
+            border-radius: 2px;
+            background: #e5e5e7;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        .intensity-control input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #0071e3;
+            cursor: pointer;
+        }
+        .intensity-value {
+            color: #0071e3;
+            font-weight: 600;
+            min-width: 40px;
+            text-align: right;
+        }
+
+        /* 滤镜分类标签 */
+        .filter-cats {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        .filter-tab {
+            padding: 5px 12px;
+            border-radius: 14px;
+            font-size: 12px;
+            cursor: pointer;
+            white-space: nowrap;
+            background: #f5f5f7;
+            color: #636366;
+            border: none;
+            transition: all 0.2s;
+        }
+        .filter-tab.active {
+            background: #0071e3;
+            color: #fff;
+        }
+
+        /* 滤镜卡片横向滚动 */
+        .filter-scroll-row {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            padding-bottom: 8px;
+        }
+        .filter-scroll-row::-webkit-scrollbar {
+            height: 6px;
+        }
+        .filter-scroll-row::-webkit-scrollbar-track {
+            background: #f0f0f5;
+            border-radius: 3px;
+        }
+        .filter-scroll-row::-webkit-scrollbar-thumb {
+            background: #c7c7cc;
+            border-radius: 3px;
+        }
+        .filter-card-compact {
+            flex: 0 0 90px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid transparent;
+            background: #f5f5f7;
+        }
+        .filter-card-compact:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .filter-card-compact.active {
+            border-color: #0071e3;
+            background: #fff;
+        }
+        .filter-card-compact .thumb {
+            width: 100%;
+            height: 60px;
+        }
+        .filter-card-compact .name {
+            font-size: 11px;
+            padding: 6px 4px;
+            text-align: center;
+            color: #1d1d1f;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* AI 工具按钮（抠图区） */
+        .ai-tool-btn {
+            width: 100%;
+            padding: 14px;
+            margin-bottom: 10px;
+            background: #f5f5f7;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 500;
+            color: #1d1d1f;
+            transition: all 0.2s;
+        }
+        .ai-tool-btn:hover {
+            background: #e8e8ed;
+        }
+        .ai-tool-btn .sub {
+            display: block;
+            font-size: 11px;
+            color: #86868b;
+            font-weight: 400;
+            margin-top: 4px;
+        }
+
         /* 下载按钮 */
         .download-btn {
-            display: none;
             background: #0071e3;
             color: #fff;
             border: none;
-            padding: 10px 20px;
+            padding: 8px 16px;
             border-radius: 8px;
-            font-size: 14px;
+            font-size: 13px;
             cursor: pointer;
-            margin-bottom: 24px;
+            display: none;
         }
         .download-btn.active { display: inline-block; }
-        .download-btn:hover { background: #0077ed; }
 
         /* loading */
         .loading {
@@ -277,77 +539,92 @@
 <body>
     <div class="header">
         <div>
-            <h1>自动滤镜</h1>
-            <div class="sub">上传图片，AI 自动分析色彩特征，推荐最适合的摄影师级滤镜</div>
+            <h1>AI 修图工具</h1>
+            <div class="sub">上传图片，自动推荐滤镜、一键优化、AI 抠图</div>
         </div>
     </div>
 
     <div class="container">
-        <!-- 上传区 -->
-        <div class="upload-zone" id="uploadZone">
-            <div class="icon">📷</div>
-            <p>点击或拖拽图片到这里</p>
-            <p class="hint">支持 JPG / PNG，自动分析并推荐滤镜</p>
+        <!-- 上传区（紧凑横条） -->
+        <div class="upload-zone compact" id="uploadZone">
+            <div class="upload-icon">📷</div>
+            <div class="upload-text">
+                <div class="upload-title">点击或拖拽上传图片</div>
+                <div class="upload-hint">支持 JPG / PNG</div>
+            </div>
         </div>
         <input type="file" id="fileInput" accept="image/*">
 
         <div class="loading" id="loading">分析图片中...</div>
 
-        <!-- 分析结果条 -->
-        <div class="analysis-bar" id="analysisBar">
-            <h3>📊 图片色彩分析</h3>
-            <div class="stats-row" id="statsRow"></div>
-        </div>
+        <!-- 主区域：左右分栏 -->
+        <div class="main-layout" id="mainLayout" style="display:none;">
+            <!-- 左栏：图片对比 -->
+            <div class="left-panel">
+                <div class="compare-area">
+                    <div class="img-panel">
+                        <div class="label">原图</div>
+                        <img id="originalImg" alt="原图">
+                    </div>
+                    <div class="img-panel">
+                        <div class="label" id="filteredLabel">效果</div>
+                        <img id="filteredImg" alt="效果">
+                        <div class="processing-overlay" id="processingOverlay">
+                            <div class="spinner"></div>
+                            <div class="processing-text">处理中...</div>
+                        </div>
+                    </div>
+                </div>
 
-        <!-- 一键智能优化 -->
-        <div class="auto-enhance-section" id="autoEnhanceSection" style="display:none;">
-            <button class="auto-enhance-btn" id="autoEnhanceBtn">
-                ✨ 一键智能优化
-                <span class="sub">自动调整曝光、白平衡、对比度、饱和度</span>
-            </button>
-        </div>
-
-        <!-- AI 工具区 -->
-        <div class="ai-tools-section" id="aiToolsSection" style="display:none;">
-            <h3>🤖 AI 工具</h3>
-            <div class="ai-tools-grid">
-                <button class="ai-tool-btn" id="removeBgFastBtn">
-                    ⚡ 快速抠图
-                    <span class="sub">轻量模型，1-2 秒出图</span>
-                </button>
-                <button class="ai-tool-btn" id="removeBgHdBtn">
-                    ✨ 高清抠图
-                    <span class="sub">完整版模型，边缘更精细</span>
-                </button>
+                <!-- 强度滑块 + 下载 -->
+                <div class="bottom-bar" id="bottomBar" style="display:none;">
+                    <div class="intensity-control" id="intensityControl">
+                        <span>强度</span>
+                        <input type="range" id="intensitySlider" min="0" max="100" value="100" step="1">
+                        <span class="intensity-value" id="intensityValue">100%</span>
+                    </div>
+                    <button class="download-btn" id="downloadBtn">下载</button>
+                </div>
             </div>
-        </div>
 
-        <!-- 推荐滤镜 -->
-        <div class="recommend-section" id="recommendSection">
-            <h3>✨ 为你推荐 <span class="badge">AI 推荐</span></h3>
-            <div class="filter-row" id="recommendRow"></div>
-        </div>
+            <!-- 右栏：功能面板 -->
+            <div class="right-panel">
+                <!-- 功能标签切换 -->
+                <div class="func-tabs">
+                    <button class="func-tab active" data-func="filters">🎨 滤镜</button>
+                    <button class="func-tab" data-func="removebg">✂️ 抠图</button>
+                    <button class="func-tab" data-func="enhance">✨ 优化</button>
+                </div>
 
-        <!-- 图片对比 -->
-        <div class="compare-area" id="compareArea">
-            <div class="img-panel">
-                <div class="label">原图 <span class="tag">Original</span></div>
-                <img id="originalImg" alt="原图">
-            </div>
-            <div class="img-panel">
-                <div class="label" id="filteredLabel">滤镜效果 <span class="tag" id="filteredTag">-</span></div>
-                <img id="filteredImg" alt="滤镜效果">
-                <div class="processing-overlay" id="processingOverlay">
-                    <div class="spinner"></div>
-                    <div class="processing-text">滤镜渲染中...</div>
+                <!-- 滤镜功能区 -->
+                <div class="func-content" id="funcFilters">
+                    <!-- 滤镜分类标签 -->
+                    <div class="filter-cats" id="filterTabs"></div>
+                    <!-- 滤镜卡片横向滚动 -->
+                    <div class="filter-scroll-row" id="filterScrollRow"></div>
+                </div>
+
+                <!-- 抠图功能区 -->
+                <div class="func-content" id="funcRemoveBg" style="display:none;">
+                    <button class="ai-tool-btn" id="removeBgFastBtn">
+                        ⚡ 快速抠图
+                        <span class="sub">1-2 秒出图</span>
+                    </button>
+                    <button class="ai-tool-btn" id="removeBgHdBtn">
+                        ✨ 高清抠图
+                        <span class="sub">边缘更精细</span>
+                    </button>
+                </div>
+
+                <!-- 智能优化功能区 -->
+                <div class="func-content" id="funcEnhance" style="display:none;">
+                    <button class="auto-enhance-btn" id="autoEnhanceBtn">
+                        ✨ 一键智能优化
+                        <span class="sub">自动调曝光/白平衡/对比度</span>
+                    </button>
                 </div>
             </div>
         </div>
-
-        <button class="download-btn" id="downloadBtn">下载处理后的图片</button>
-
-        <!-- 全部滤镜库 -->
-        <div class="filters-grid" id="filtersGrid"></div>
     </div>
 
     <script>
@@ -355,20 +632,39 @@
         const fileInput = document.getElementById('fileInput');
         const originalImg = document.getElementById('originalImg');
         const filteredImg = document.getElementById('filteredImg');
-        const compareArea = document.getElementById('compareArea');
-        const analysisBar = document.getElementById('analysisBar');
-        const statsRow = document.getElementById('statsRow');
-        const recommendRow = document.getElementById('recommendRow');
-        const recommendSection = document.getElementById('recommendSection');
-        const autoEnhanceSection = document.getElementById('autoEnhanceSection');
-        const autoEnhanceBtn = document.getElementById('autoEnhanceBtn');
-        const aiToolsSection = document.getElementById('aiToolsSection');
-        const removeBgFastBtn = document.getElementById('removeBgFastBtn');
-        const removeBgHdBtn = document.getElementById('removeBgHdBtn');
-        const filtersGrid = document.getElementById('filtersGrid');
+        const mainLayout = document.getElementById('mainLayout');
         const loading = document.getElementById('loading');
         const downloadBtn = document.getElementById('downloadBtn');
-        const filteredTag = document.getElementById('filteredTag');
+        const filteredLabel = document.getElementById('filteredLabel');
+        const processingOverlay = document.getElementById('processingOverlay');
+        const intensityControl = document.getElementById('intensityControl');
+        const intensitySlider = document.getElementById('intensitySlider');
+        const intensityValue = document.getElementById('intensityValue');
+
+        // 功能标签切换
+        const funcTabs = document.querySelectorAll('.func-tab');
+        const funcContents = {
+            filters: document.getElementById('funcFilters'),
+            removebg: document.getElementById('funcRemoveBg'),
+            enhance: document.getElementById('funcEnhance')
+        };
+
+        funcTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                funcTabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                const func = tab.dataset.func;
+                Object.keys(funcContents).forEach(k => {
+                    funcContents[k].style.display = k === func ? 'block' : 'none';
+                });
+            });
+        });
+
+        const removeBgFastBtn = document.getElementById('removeBgFastBtn');
+        const removeBgHdBtn = document.getElementById('removeBgHdBtn');
+        const autoEnhanceBtn = document.getElementById('autoEnhanceBtn');
+        const filterTabs = document.getElementById('filterTabs');
+        const filterScrollRow = document.getElementById('filterScrollRow');
 
         let currentFile = null;
         let currentFilterIdx = -1;
@@ -409,12 +705,14 @@
             reader.onload = e => {
                 originalImg.src = e.target.result;
                 filteredImg.src = e.target.result;
-                compareArea.classList.add('active');
+                mainLayout.style.display = 'grid';
+                document.querySelector('.compare-area').classList.add('active');
                 downloadBtn.classList.remove('active');
+                intensityControl.style.display = 'none';
             };
             reader.readAsDataURL(file);
 
-            // 分析图片
+            // 分析图片（后台跑，不阻塞）
             loading.classList.add('active');
             const formData = new FormData();
             formData.append('image', file);
@@ -423,15 +721,10 @@
                 .then(r => r.json())
                 .then(data => {
                     loading.classList.remove('active');
-                    showAnalysis(data.stats);
-                    renderRecommend(data.recommend);
-                    filtersGrid.classList.add('active');
-                    autoEnhanceSection.style.display = 'block';
-                    aiToolsSection.style.display = 'block';
+                    // 分析结果暂时不展示，后面再加
                 })
                 .catch(err => {
                     loading.classList.remove('active');
-                    alert('分析失败: ' + err);
                 });
         }
 
@@ -474,64 +767,93 @@
             });
 
             const catNames = {
-                film: '🎞️ 胶片复古风',
-                japanese: '🌸 日系小清新',
-                cinematic: '🎬 电影感调色',
-                vsco: '📸 VSCO 经典系列',
-                special: '✨ 特效增强'
+                film: '🎞️ 胶片',
+                japanese: '🌸 日系',
+                cinematic: '🎬 电影感',
+                vsco: '📸 VSCO'
             };
 
-            filtersGrid.innerHTML = '';
-            Object.keys(categories).forEach(cat => {
-                const section = document.createElement('div');
-                section.className = 'category-section';
-                section.innerHTML = `<h4>${catNames[cat] || cat}</h4>`;
-                const row = document.createElement('div');
-                row.className = 'filter-row';
+            const tabsEl = document.getElementById('filterTabs');
+            const rowEl = document.getElementById('filterScrollRow');
 
-                categories[cat].forEach(f => {
+            tabsEl.innerHTML = '';
+            rowEl.innerHTML = '';
+
+            const catKeys = Object.keys(categories);
+            let activeCat = catKeys[0];
+
+            // 渲染标签
+            catKeys.forEach((cat, idx) => {
+                const tab = document.createElement('button');
+                tab.className = 'filter-tab' + (idx === 0 ? ' active' : '');
+                tab.textContent = catNames[cat] || cat;
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    activeCat = cat;
+                    renderCards();
+                });
+                tabsEl.appendChild(tab);
+            });
+
+            // 渲染当前分类的滤镜卡片
+            function renderCards() {
+                rowEl.innerHTML = '';
+                categories[activeCat].forEach((f, i) => {
                     const card = document.createElement('div');
-                    card.className = 'filter-card';
+                    card.className = 'filter-card-compact';
                     card.dataset.idx = f.idx;
+                    // 用不同渐变区分不同滤镜
+                    const gradients = [
+                        'linear-gradient(135deg, #667eea, #764ba2)',
+                        'linear-gradient(135deg, #f093fb, #f5576c)',
+                        'linear-gradient(135deg, #4facfe, #00f2fe)',
+                        'linear-gradient(135deg, #43e97b, #38f9d7)',
+                        'linear-gradient(135deg, #fa709a, #fee140)',
+                        'linear-gradient(135deg, #a8edea, #fed6e3)'
+                    ];
+                    const bg = gradients[i % gradients.length];
                     card.innerHTML = `
-                        <div class="thumb" style="background: linear-gradient(135deg, #a8c0ff, #3f2b96)"></div>
+                        <div class="thumb" style="background: ${bg}"></div>
                         <div class="name">${f.name}</div>
-                        <div class="desc">${f.description}</div>
                     `;
                     card.addEventListener('click', () => applyFilter(f.idx));
-                    row.appendChild(card);
+                    rowEl.appendChild(card);
                 });
+            }
 
-                section.appendChild(row);
-                filtersGrid.appendChild(section);
-            });
+            renderCards();
         }
 
-        function applyFilter(idx) {
+        function applyFilter(idx, intensity) {
             if (!currentFile) return;
             currentFilterIdx = idx;
             const f = filters[idx];
-            filteredTag.textContent = f.name;
+            filteredLabel.textContent = f.name;
+
+            // 显示底部栏 + 强度滑块
+            document.getElementById('bottomBar').style.display = 'flex';
+            intensityControl.style.display = 'flex';
 
             // 更新卡片高亮
-            document.querySelectorAll('.filter-card').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.filter-card-compact').forEach(c => c.classList.remove('active'));
             document.querySelectorAll(`[data-idx="${idx}"]`).forEach(c => c.classList.add('active'));
 
             // 显示处理中遮罩
-            const overlay = document.getElementById('processingOverlay');
-            overlay.classList.add('active');
+            processingOverlay.classList.add('active');
 
             // 调用后端应用滤镜
             const formData = new FormData();
             formData.append('image', currentFile);
 
-            fetch(`/api/apply?index=${idx}`, { method: 'POST', body: formData })
+            const intensityParam = intensity ? `&intensity=${intensity}` : '';
+            fetch(`/api/apply?index=${idx}${intensityParam}`, { method: 'POST', body: formData })
                 .then(r => r.blob())
                 .then(blob => {
                     const url = URL.createObjectURL(blob);
                     filteredImg.src = url;
                     downloadBtn.classList.add('active');
-                    overlay.classList.remove('active');
+                    processingOverlay.classList.remove('active');
 
                     // 下载按钮
                     downloadBtn.onclick = () => {
@@ -542,7 +864,7 @@
                     };
                 })
                 .catch(err => {
-                    overlay.classList.remove('active');
+                    processingOverlay.classList.remove('active');
                     alert('滤镜应用失败: ' + err);
                 });
         }
@@ -551,14 +873,16 @@
         autoEnhanceBtn.addEventListener('click', () => {
             if (!currentFile) return;
             currentFilterIdx = -1;
-            filteredTag.textContent = 'AI 自动优化';
+            filteredLabel.textContent = 'AI 自动优化';
 
             // 清除卡片高亮
-            document.querySelectorAll('.filter-card').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.filter-card-compact').forEach(c => c.classList.remove('active'));
+
+            // 显示底部栏
+            document.getElementById('bottomBar').style.display = 'flex';
 
             // 显示处理中遮罩
-            const overlay = document.getElementById('processingOverlay');
-            overlay.classList.add('active');
+            processingOverlay.classList.add('active');
 
             // 调用后端智能优化
             const formData = new FormData();
@@ -570,7 +894,7 @@
                     const url = URL.createObjectURL(blob);
                     filteredImg.src = url;
                     downloadBtn.classList.add('active');
-                    overlay.classList.remove('active');
+                    processingOverlay.classList.remove('active');
 
                     // 下载按钮
                     downloadBtn.onclick = () => {
@@ -581,7 +905,7 @@
                     };
                 })
                 .catch(err => {
-                    overlay.classList.remove('active');
+                    processingOverlay.classList.remove('active');
                     alert('智能优化失败: ' + err);
                 });
         });
@@ -590,15 +914,17 @@
         function doRemoveBg(mode, label) {
             if (!currentFile) return;
             currentFilterIdx = -1;
-            filteredTag.textContent = label;
+            filteredLabel.textContent = label;
 
             // 清除卡片高亮
-            document.querySelectorAll('.filter-card').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.filter-card-compact').forEach(c => c.classList.remove('active'));
+
+            // 显示底部栏
+            document.getElementById('bottomBar').style.display = 'flex';
 
             // 显示处理中遮罩
-            const overlay = document.getElementById('processingOverlay');
-            overlay.classList.add('active');
-            overlay.querySelector('.processing-text').textContent = mode === 'hd' ? '高清抠图中（稍慢）...' : '快速抠图中...';
+            processingOverlay.classList.add('active');
+            processingOverlay.querySelector('.processing-text').textContent = mode === 'hd' ? '高清抠图中（稍慢）...' : '快速抠图中...';
 
             // 调用后端抠图
             const formData = new FormData();
@@ -610,7 +936,7 @@
                     const url = URL.createObjectURL(blob);
                     filteredImg.src = url;
                     downloadBtn.classList.add('active');
-                    overlay.classList.remove('active');
+                    processingOverlay.classList.remove('active');
 
                     // 下载按钮
                     downloadBtn.onclick = () => {
@@ -621,13 +947,29 @@
                     };
                 })
                 .catch(err => {
-                    overlay.classList.remove('active');
+                    processingOverlay.classList.remove('active');
                     alert('AI 抠图失败: ' + err);
                 });
         }
 
         removeBgFastBtn.addEventListener('click', () => doRemoveBg('fast', 'AI 快速抠图'));
         removeBgHdBtn.addEventListener('click', () => doRemoveBg('hd', 'AI 高清抠图'));
+
+        // 滤镜强度滑块拖动事件
+        let intensityTimer;
+
+        intensitySlider.addEventListener('input', () => {
+            const val = intensitySlider.value;
+            intensityValue.textContent = val + '%';
+
+            // 防抖：拖动停止后 300ms 才重新应用滤镜
+            clearTimeout(intensityTimer);
+            intensityTimer = setTimeout(() => {
+                if (currentFilterIdx >= 0) {
+                    applyFilter(currentFilterIdx, val);
+                }
+            }, 300);
+        });
     </script>
 </body>
 </html>

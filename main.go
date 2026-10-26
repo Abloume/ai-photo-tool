@@ -47,7 +47,8 @@ func initRemover(modelPath string) *rmbg.RemBG {
 func main() {
 	// 加载两个抠图模型：轻量版 + 完整版
 	removerFast = initRemover("models/u2netp.onnx")
-	removerHD = initRemover("models/u2net.onnx")
+	// removerHD = initRemover("models/u2net.onnx") // 高清模型太大，暂时注释
+	removerHD = nil
 
 	if removerFast == nil && removerHD == nil {
 		fmt.Println("ℹ️  AI 抠图未启用（无可用模型）")
@@ -137,6 +138,15 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f := presetFilters[idx]
+
+	// 读取滤镜强度参数（可选，默认 100）
+	intensityStr := r.URL.Query().Get("intensity")
+	if intensityStr != "" {
+		intensity, err := strconv.ParseFloat(intensityStr, 64)
+		if err == nil {
+			f.Intensity = intensity
+		}
+	}
 
 	// 解析上传的图片
 	file, _, err := r.FormFile("image")

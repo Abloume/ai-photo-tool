@@ -36,6 +36,9 @@ type Filter struct {
 	Vignette    float64 `json:"vignette"`    // 暗角：0无 ~ 100极强
 	Grain       float64 `json:"grain"`       // 胶片颗粒：0无 ~ 100强
 
+	// 滤镜强度：0=原图，100=完整滤镜效果
+	Intensity float64 `json:"intensity"` // 强度百分比 0-100
+
 	// 色调分离（阴影/高光分别偏色）
 	ShadowTintHue    float64 `json:"shadowTintHue"`    // 阴影色相角度 0-360
 	ShadowTintAmount float64 `json:"shadowTintAmount"`  // 阴影偏色强度 -100 ~ +100
@@ -58,12 +61,13 @@ func Apply(src image.Image, f Filter) *image.RGBA {
 			r, g, b, a := src.At(x, y).RGBA()
 			// RGBA() 返回 0-65535 的值，需要转成 0-255
 			// 【JS→Go 差异】JS 的 Uint8ClampedArray 天然就是 0-255，不用移位
-			r8 := float64(r >> 8)
-			g8 := float64(g >> 8)
-			b8 := float64(b >> 8)
+			origR := float64(r >> 8)
+			origG := float64(g >> 8)
+			origB := float64(b >> 8)
 			a8 := float64(a >> 8)
 
 			// 逐步应用各项调整
+			r8, g8, b8 := origR, origG, origB
 			r8, g8, b8 = adjustTemperature(r8, g8, b8, f.Temperature)
 			r8, g8, b8 = adjustTint(r8, g8, b8, f.Tint)
 			r8, g8, b8 = adjustSaturation(r8, g8, b8, f.Saturation)
@@ -73,8 +77,19 @@ func Apply(src image.Image, f Filter) *image.RGBA {
 			r8, g8, b8 = splitTone(r8, g8, b8, f)
 			r8, g8, b8 = applyVignette(r8, g8, b8, x, y, w, h, f.Vignette)
 
-			//  clamping 到 0-255
-			// 【JS→Go 差异】JS 的 Uint8ClampedArray 自动 clamp，Go 要手动写
+			// 按滤镜强度混合原图和调整结果
+			// intensity=100 完全用滤镜，intensity=0 完全用原图
+			// 默认值 100（未设置时用完整滤镜效果）
+			intensity := f.Intensity
+			if intensity == 0 { intensity = 100 }
+			intensity /= 100.0
+			if intensity < 0 { intensity = 0 }
+			if intensity > 1 { intensity = 1 }
+			r8 = origR*(1-intensity) + r8*intensity
+			g8 = origG*(1-intensity) + g8*intensity
+			b8 = origB*(1-intensity) + b8*intensity
+
+			// clamping 到 0-255
 			r8 = clamp255(r8)
 			g8 = clamp255(g8)
 			b8 = clamp255(b8)
