@@ -373,45 +373,69 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
 
-        /* 底部栏：强度 + 下载 */
-        .bottom-bar {
-            display: flex;
-            align-items: center;
-            gap: 16px;
+        /* 滤镜强度面板（跟图片对比放一起） */
+        .intensity-panel {
             background: #fff;
-            padding: 12px 16px;
+            padding: 14px 16px;
             border-radius: 12px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         }
-        .intensity-control {
+        .intensity-header {
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            gap: 10px;
-            flex: 1;
+            margin-bottom: 10px;
             font-size: 13px;
             color: #636366;
         }
-        .intensity-control input[type="range"] {
-            flex: 1;
+        .intensity-value {
+            color: #0071e3;
+            font-weight: 600;
+        }
+        .intensity-panel input[type="range"] {
+            width: 100%;
             height: 4px;
             border-radius: 2px;
             background: #e5e5e7;
             outline: none;
             -webkit-appearance: none;
         }
-        .intensity-control input[type="range"]::-webkit-slider-thumb {
+        .intensity-panel input[type="range"]::-webkit-slider-thumb {
             -webkit-appearance: none;
-            width: 16px;
-            height: 16px;
+            width: 18px;
+            height: 18px;
             border-radius: 50%;
             background: #0071e3;
             cursor: pointer;
+            box-shadow: 0 1px 4px rgba(0,113,227,0.3);
         }
-        .intensity-value {
-            color: #0071e3;
-            font-weight: 600;
-            min-width: 40px;
-            text-align: right;
+
+        /* 保存按钮（右栏底部，独立大按钮） */
+        .save-btn {
+            width: 100%;
+            margin-top: 16px;
+            padding: 12px;
+            background: #0071e3;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: background 0.2s;
+        }
+        .save-btn.active {
+            display: flex;
+        }
+        .save-btn:hover {
+            background: #0077ed;
+        }
+        .save-icon {
+            font-size: 16px;
         }
 
         /* 滤镜分类标签 */
@@ -517,13 +541,21 @@
             background: #0071e3;
             color: #fff;
             border: none;
-            padding: 8px 16px;
+            padding: 10px 20px;
             border-radius: 8px;
-            font-size: 13px;
+            font-size: 14px;
             cursor: pointer;
             display: none;
+            align-self: flex-end;
+            transition: background 0.2s;
         }
-        .download-btn.active { display: inline-block; }
+        .download-btn:hover {
+            background: #0077ed;
+        }
+        .download-btn.active { display: inline-flex; align-items: center; gap: 6px; }
+        .download-icon {
+            font-size: 16px;
+        }
 
         /* loading */
         .loading {
@@ -559,7 +591,7 @@
 
         <!-- 主区域：左右分栏 -->
         <div class="main-layout" id="mainLayout" style="display:none;">
-            <!-- 左栏：图片对比 -->
+            <!-- 左栏：图片对比 + 强度调节 -->
             <div class="left-panel">
                 <div class="compare-area">
                     <div class="img-panel">
@@ -576,14 +608,13 @@
                     </div>
                 </div>
 
-                <!-- 强度滑块 + 下载 -->
-                <div class="bottom-bar" id="bottomBar" style="display:none;">
-                    <div class="intensity-control" id="intensityControl">
-                        <span>强度</span>
-                        <input type="range" id="intensitySlider" min="0" max="100" value="100" step="1">
+                <!-- 滤镜强度调节（跟图片对比放一起） -->
+                <div class="intensity-panel" id="intensityPanel" style="display:none;">
+                    <div class="intensity-header">
+                        <span>滤镜强度</span>
                         <span class="intensity-value" id="intensityValue">100%</span>
                     </div>
-                    <button class="download-btn" id="downloadBtn">下载</button>
+                    <input type="range" id="intensitySlider" min="0" max="100" value="100" step="1">
                 </div>
             </div>
 
@@ -623,6 +654,12 @@
                         <span class="sub">自动调曝光/白平衡/对比度</span>
                     </button>
                 </div>
+
+                <!-- 保存按钮（右栏底部，独立） -->
+                <button class="save-btn" id="downloadBtn">
+                    <span class="save-icon">💾</span>
+                    保存图片
+                </button>
             </div>
         </div>
     </div>
@@ -637,7 +674,6 @@
         const downloadBtn = document.getElementById('downloadBtn');
         const filteredLabel = document.getElementById('filteredLabel');
         const processingOverlay = document.getElementById('processingOverlay');
-        const intensityControl = document.getElementById('intensityControl');
         const intensitySlider = document.getElementById('intensitySlider');
         const intensityValue = document.getElementById('intensityValue');
 
@@ -657,6 +693,13 @@
                 Object.keys(funcContents).forEach(k => {
                     funcContents[k].style.display = k === func ? 'block' : 'none';
                 });
+                // 只有滤镜功能才显示强度滑块
+                const intensityPanel = document.getElementById('intensityPanel');
+                if (func === 'filters' && currentFilterIdx >= 0) {
+                    intensityPanel.style.display = 'block';
+                } else {
+                    intensityPanel.style.display = 'none';
+                }
             });
         });
 
@@ -708,7 +751,6 @@
                 mainLayout.style.display = 'grid';
                 document.querySelector('.compare-area').classList.add('active');
                 downloadBtn.classList.remove('active');
-                intensityControl.style.display = 'none';
             };
             reader.readAsDataURL(file);
 
@@ -832,8 +874,7 @@
             filteredLabel.textContent = f.name;
 
             // 显示底部栏 + 强度滑块
-            document.getElementById('bottomBar').style.display = 'flex';
-            intensityControl.style.display = 'flex';
+            document.getElementById('intensityPanel').style.display = 'block';
 
             // 更新卡片高亮
             document.querySelectorAll('.filter-card-compact').forEach(c => c.classList.remove('active'));
@@ -878,8 +919,8 @@
             // 清除卡片高亮
             document.querySelectorAll('.filter-card-compact').forEach(c => c.classList.remove('active'));
 
-            // 显示底部栏
-            document.getElementById('bottomBar').style.display = 'flex';
+            // 隐藏强度滑块（非滤镜功能）
+            document.getElementById('intensityPanel').style.display = 'none';
 
             // 显示处理中遮罩
             processingOverlay.classList.add('active');
@@ -919,8 +960,8 @@
             // 清除卡片高亮
             document.querySelectorAll('.filter-card-compact').forEach(c => c.classList.remove('active'));
 
-            // 显示底部栏
-            document.getElementById('bottomBar').style.display = 'flex';
+            // 隐藏强度滑块（非滤镜功能）
+            document.getElementById('intensityPanel').style.display = 'none';
 
             // 显示处理中遮罩
             processingOverlay.classList.add('active');
