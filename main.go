@@ -47,13 +47,14 @@ func initRemover(modelPath string) *rmbg.RemBG {
 func main() {
 	// 加载两个抠图模型：轻量版 + 完整版
 	removerFast = initRemover("models/u2netp.onnx")
-	// removerHD = initRemover("models/u2net.onnx") // 高清模型太大，暂时注释
-	removerHD = nil
+	removerHD = initRemover("models/u2net.onnx")
 
 	if removerFast == nil && removerHD == nil {
 		fmt.Println("ℹ️  AI 抠图未启用（无可用模型）")
-	} else if removerHD != nil {
+	} else if removerHD != nil && removerFast != nil {
 		fmt.Println("✅  AI 抠图已就绪（快速版 + 高清版）")
+	} else if removerHD != nil {
+		fmt.Println("✅  AI 抠图已就绪（仅高清版）")
 	} else {
 		fmt.Println("✅  AI 抠图已就绪（仅快速版）")
 	}
@@ -222,11 +223,21 @@ func handleRemoveBg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 选择模型：默认 fast，hd 不可用时自动回退
+	// 选择模型：默认 fast，hd 延迟加载
 	modelType := r.URL.Query().Get("model")
 	var remover *rmbg.RemBG
-	if modelType == "hd" && removerHD != nil {
-		remover = removerHD
+	if modelType == "hd" {
+		// 高清模型延迟加载：第一次调用时才初始化
+		if removerHD == nil {
+			fmt.Println("⏳  正在加载高清抠图模型（首次调用稍慢）...")
+			removerHD = initRemover("models/u2net.onnx")
+		}
+		if removerHD != nil {
+			remover = removerHD
+		} else {
+			fmt.Println("⚠️  高清模型加载失败，回退到快速模型")
+			remover = removerFast
+		}
 	} else {
 		remover = removerFast
 	}
