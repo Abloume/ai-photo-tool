@@ -1,0 +1,13 @@
+# 编译产物
+auto-filter
+auto-filter.exe
+
+# macOS 系统文件
+.DS_Store
+
+# AI 模型文件（太大，不提交到 git）
+models/
+libs/
+
+# Python 临时文件
+scripts/__pycache__/

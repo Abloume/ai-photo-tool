@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自动滤镜 · 摄影师级一键调色</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f5f5f7;
+            color: #1d1d1f;
+            min-height: 100vh;
+        }
+        .header {
+            background: #fff;
+            padding: 20px 40px;
+            border-bottom: 1px solid #e5e5e7;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 { font-size: 20px; font-weight: 600; }
+        .header .sub { font-size: 13px; color: #86868b; margin-top: 2px; }
+
+        .container { max-width: 1200px; margin: 0 auto; padding: 30px 20px; }
+
+        /* 上传区 */
+        .upload-zone {
+            border: 2px dashed #c7c7cc;
+            border-radius: 12px;
+            padding: 60px 20px;
+            text-align: center;
+            background: #fff;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 24px;
+        }
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: #0071e3;
+            background: #f0f7ff;
+        }
+        .upload-zone .icon { font-size: 40px; margin-bottom: 12px; }
+        .upload-zone p { color: #86868b; font-size: 14px; }
+        .upload-zone .hint { font-size: 12px; margin-top: 8px; color: #aeaeb2; }
+        #fileInput { display: none; }
+
+        /* 图片对比区 */
+        .compare-area {
+            display: none;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+        .compare-area.active { display: grid; grid-template-columns: 1fr 1fr; }
+        .img-panel {
+            background: #fff;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            position: relative;
+        }
+        .img-panel .label {
+            padding: 12px 16px;
+            font-size: 13px;
+            font-weight: 500;
+            border-bottom: 1px solid #f0f0f2;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .img-panel .label .tag {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: #f0f0f2;
+            color: #636366;
+        }
+        .img-panel img {
+            width: 100%;
+            display: block;
+            max-height: 500px;
+            object-fit: contain;
+            background: #fafafa;
+        }
+        .img-panel .processing-overlay {
+            display: none;
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.85);
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 10;
+        }
+        .img-panel .processing-overlay.active { display: flex; }
+        .spinner {
+            width: 30px; height: 30px;
+            border: 3px solid #e5e5e7;
+            border-top-color: #0071e3;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .processing-text { font-size: 13px; color: #636366; }
+
+        /* 分析结果 */
+        .analysis-bar {
+            display: none;
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .analysis-bar.active { display: block; }
+        .analysis-bar h3 { font-size: 14px; margin-bottom: 12px; }
+        .stats-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            font-size: 12px;
+            color: #636366;
+        }
+        .stat-item { display: flex; align-items: center; gap: 6px; }
+        .stat-item .dot {
+            width: 8px; height: 8px; border-radius: 50%;
+        }
+
+        /* 一键智能优化按钮 */
+        .auto-enhance-section { margin-bottom: 24px; }
+        .auto-enhance-btn {
+            width: 100%;
+            padding: 18px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+        .auto-enhance-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3); }
+        .auto-enhance-btn .sub { font-size: 12px; opacity: 0.8; font-weight: 400; }
+
+        /* AI 工具区 */
+        .ai-tools-section { margin-bottom: 24px; }
+        .ai-tools-section h3 {
+            font-size: 15px;
+            margin-bottom: 12px;
+            color: #1d1d1f;
+        }
+        .ai-tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 12px;
+        }
+        .ai-tool-btn {
+            padding: 16px;
+            background: #fff;
+            border: 2px solid #e5e5e7;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #1d1d1f;
+        }
+        .ai-tool-btn:hover {
+            border-color: #0071e3;
+            background: #f0f7ff;
+            transform: translateY(-1px);
+        }
+        .ai-tool-btn .sub { font-size: 11px; color: #86868b; font-weight: 400; text-align: center; }
+
+        /* 推荐区 */
+        .recommend-section { margin-bottom: 24px; }
+        .recommend-section h3 {
+            font-size: 15px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .recommend-section h3 .badge {
+            font-size: 11px;
+            background: #0071e3;
+            color: #fff;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+
+        /* 滤镜网格 */
+        .filters-grid {
+            display: none;
+        }
+        .filters-grid.active { display: block; }
+
+        .category-section { margin-bottom: 24px; }
+        .category-section h4 {
+            font-size: 13px;
+            color: #636366;
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+        .filter-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 10px;
+        }
+        .filter-card {
+            background: #fff;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.15s;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+        }
+        .filter-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .filter-card.active { border-color: #0071e3; }
+        .filter-card .thumb {
+            width: 100%;
+            height: 90px;
+            background: #eee;
+            background-size: cover;
+            background-position: center;
+        }
+        .filter-card .name {
+            padding: 8px 10px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .filter-card .desc {
+            padding: 0 10px 8px;
+            font-size: 11px;
+            color: #86868b;
+            line-height: 1.3;
+        }
+
+        /* 下载按钮 */
+        .download-btn {
+            display: none;
+            background: #0071e3;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            margin-bottom: 24px;
+        }
+        .download-btn.active { display: inline-block; }
+        .download-btn:hover { background: #0077ed; }
+
+        /* loading */
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #86868b;
+            font-size: 14px;
+        }
+        .loading.active { display: block; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>自动滤镜</h1>
+            <div class="sub">上传图片，AI 自动分析色彩特征，推荐最适合的摄影师级滤镜</div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- 上传区 -->
+        <div class="upload-zone" id="uploadZone">
+            <div class="icon">📷</div>
+            <p>点击或拖拽图片到这里</p>
+            <p class="hint">支持 JPG / PNG，自动分析并推荐滤镜</p>
+        </div>
+        <input type="file" id="fileInput" accept="image/*">
+
+        <div class="loading" id="loading">分析图片中...</div>
+
+        <!-- 分析结果条 -->
+        <div class="analysis-bar" id="analysisBar">
+            <h3>📊 图片色彩分析</h3>
+            <div class="stats-row" id="statsRow"></div>
+        </div>
+
+        <!-- 一键智能优化 -->
+        <div class="auto-enhance-section" id="autoEnhanceSection" style="display:none;">
+            <button class="auto-enhance-btn" id="autoEnhanceBtn">
+                ✨ 一键智能优化
+                <span class="sub">自动调整曝光、白平衡、对比度、饱和度</span>
+            </button>
+        </div>
+
+        <!-- AI 工具区 -->
+        <div class="ai-tools-section" id="aiToolsSection" style="display:none;">
+            <h3>🤖 AI 工具</h3>
+            <div class="ai-tools-grid">
+                <button class="ai-tool-btn" id="removeBgFastBtn">
+                    ⚡ 快速抠图
+                    <span class="sub">轻量模型，1-2 秒出图</span>
+                </button>
+                <button class="ai-tool-btn" id="removeBgHdBtn">
+                    ✨ 高清抠图
+                    <span class="sub">完整版模型，边缘更精细</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 推荐滤镜 -->
+        <div class="recommend-section" id="recommendSection">
+            <h3>✨ 为你推荐 <span class="badge">AI 推荐</span></h3>
+            <div class="filter-row" id="recommendRow"></div>
+        </div>
+
+        <!-- 图片对比 -->
+        <div class="compare-area" id="compareArea">
+            <div class="img-panel">
+                <div class="label">原图 <span class="tag">Original</span></div>
+                <img id="originalImg" alt="原图">
+            </div>
+            <div class="img-panel">
+                <div class="label" id="filteredLabel">滤镜效果 <span class="tag" id="filteredTag">-</span></div>
+                <img id="filteredImg" alt="滤镜效果">
+                <div class="processing-overlay" id="processingOverlay">
+                    <div class="spinner"></div>
+                    <div class="processing-text">滤镜渲染中...</div>
+                </div>
+            </div>
+        </div>
+
+        <button class="download-btn" id="downloadBtn">下载处理后的图片</button>
+
+        <!-- 全部滤镜库 -->
+        <div class="filters-grid" id="filtersGrid"></div>
+    </div>
+
+    <script>
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const originalImg = document.getElementById('originalImg');
+        const filteredImg = document.getElementById('filteredImg');
+        const compareArea = document.getElementById('compareArea');
+        const analysisBar = document.getElementById('analysisBar');
+        const statsRow = document.getElementById('statsRow');
+        const recommendRow = document.getElementById('recommendRow');
+        const recommendSection = document.getElementById('recommendSection');
+        const autoEnhanceSection = document.getElementById('autoEnhanceSection');
+        const autoEnhanceBtn = document.getElementById('autoEnhanceBtn');
+        const aiToolsSection = document.getElementById('aiToolsSection');
+        const removeBgFastBtn = document.getElementById('removeBgFastBtn');
+        const removeBgHdBtn = document.getElementById('removeBgHdBtn');
+        const filtersGrid = document.getElementById('filtersGrid');
+        const loading = document.getElementById('loading');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const filteredTag = document.getElementById('filteredTag');
+
+        let currentFile = null;
+        let currentFilterIdx = -1;
+        let filters = [];
+
+        // 加载滤镜列表
+        fetch('/api/filters')
+            .then(r => r.json())
+            .then(data => {
+                filters = data;
+                renderFilterLibrary();
+            });
+
+        // 上传交互
+        uploadZone.addEventListener('click', () => fileInput.click());
+        uploadZone.addEventListener('dragover', e => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+        uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+        uploadZone.addEventListener('drop', e => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) handleFile(file);
+        });
+        fileInput.addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (file) handleFile(file);
+        });
+
+        function handleFile(file) {
+            currentFile = file;
+            currentFilterIdx = -1;
+
+            // 显示原图
+            const reader = new FileReader();
+            reader.onload = e => {
+                originalImg.src = e.target.result;
+                filteredImg.src = e.target.result;
+                compareArea.classList.add('active');
+                downloadBtn.classList.remove('active');
+            };
+            reader.readAsDataURL(file);
+
+            // 分析图片
+            loading.classList.add('active');
+            const formData = new FormData();
+            formData.append('image', file);
+
+            fetch('/api/analyze', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    loading.classList.remove('active');
+                    showAnalysis(data.stats);
+                    renderRecommend(data.recommend);
+                    filtersGrid.classList.add('active');
+                    autoEnhanceSection.style.display = 'block';
+                    aiToolsSection.style.display = 'block';
+                })
+                .catch(err => {
+                    loading.classList.remove('active');
+                    alert('分析失败: ' + err);
+                });
+        }
+
+        function showAnalysis(stats) {
+            analysisBar.classList.add('active');
+            const tags = [];
+            tags.push(`色温: ${Math.round(stats.colorTemp)}K`);
+            tags.push(`亮度: ${Math.round(stats.avgLum)}`);
+            tags.push(`饱和度: ${(stats.saturation * 100).toFixed(0)}%`);
+            if (stats.isDark) tags.push('偏暗');
+            if (stats.isBright) tags.push('偏亮');
+            if (stats.isWarm) tags.push('偏暖');
+            if (stats.isCool) tags.push('偏冷');
+            statsRow.innerHTML = tags.map(t => `<span class="stat-item">${t}</span>`).join('');
+        }
+
+        function renderRecommend(recommendFilters) {
+            recommendRow.innerHTML = '';
+            recommendFilters.forEach((f, i) => {
+                // 按名称匹配索引（JSON 反序列化后引用不同，indexOf 找不到）
+                const idx = filters.findIndex(ff => ff.name === f.name);
+                const card = document.createElement('div');
+                card.className = 'filter-card';
+                card.dataset.idx = idx;
+                card.innerHTML = `
+                    <div class="thumb" style="background: linear-gradient(135deg, #667eea, #764ba2)"></div>
+                    <div class="name">${f.name}</div>
+                    <div class="desc">${f.description}</div>
+                `;
+                card.addEventListener('click', () => applyFilter(idx));
+                recommendRow.appendChild(card);
+            });
+        }
+
+        function renderFilterLibrary() {
+            const categories = {};
+            filters.forEach((f, i) => {
+                if (!categories[f.category]) categories[f.category] = [];
+                categories[f.category].push({ ...f, idx: i });
+            });
+
+            const catNames = {
+                film: '🎞️ 胶片复古风',
+                japanese: '🌸 日系小清新',
+                cinematic: '🎬 电影感调色',
+                vsco: '📸 VSCO 经典系列',
+                special: '✨ 特效增强'
+            };
+
+            filtersGrid.innerHTML = '';
+            Object.keys(categories).forEach(cat => {
+                const section = document.createElement('div');
+                section.className = 'category-section';
+                section.innerHTML = `<h4>${catNames[cat] || cat}</h4>`;
+                const row = document.createElement('div');
+                row.className = 'filter-row';
+
+                categories[cat].forEach(f => {
+                    const card = document.createElement('div');
+                    card.className = 'filter-card';
+                    card.dataset.idx = f.idx;
+                    card.innerHTML = `
+                        <div class="thumb" style="background: linear-gradient(135deg, #a8c0ff, #3f2b96)"></div>
+                        <div class="name">${f.name}</div>
+                        <div class="desc">${f.description}</div>
+                    `;
+                    card.addEventListener('click', () => applyFilter(f.idx));
+                    row.appendChild(card);
+                });
+
+                section.appendChild(row);
+                filtersGrid.appendChild(section);
+            });
+        }
+
+        function applyFilter(idx) {
+            if (!currentFile) return;
+            currentFilterIdx = idx;
+            const f = filters[idx];
+            filteredTag.textContent = f.name;
+
+            // 更新卡片高亮
+            document.querySelectorAll('.filter-card').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll(`[data-idx="${idx}"]`).forEach(c => c.classList.add('active'));
+
+            // 显示处理中遮罩
+            const overlay = document.getElementById('processingOverlay');
+            overlay.classList.add('active');
+
+            // 调用后端应用滤镜
+            const formData = new FormData();
+            formData.append('image', currentFile);
+
+            fetch(`/api/apply?index=${idx}`, { method: 'POST', body: formData })
+                .then(r => r.blob())
+                .then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    filteredImg.src = url;
+                    downloadBtn.classList.add('active');
+                    overlay.classList.remove('active');
+
+                    // 下载按钮
+                    downloadBtn.onclick = () => {
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `filtered_${f.name.replace(/\s+/g, '_')}.jpg`;
+                        a.click();
+                    };
+                })
+                .catch(err => {
+                    overlay.classList.remove('active');
+                    alert('滤镜应用失败: ' + err);
+                });
+        }
+
+        // 一键智能优化
+        autoEnhanceBtn.addEventListener('click', () => {
+            if (!currentFile) return;
+            currentFilterIdx = -1;
+            filteredTag.textContent = 'AI 自动优化';
+
+            // 清除卡片高亮
+            document.querySelectorAll('.filter-card').forEach(c => c.classList.remove('active'));
+
+            // 显示处理中遮罩
+            const overlay = document.getElementById('processingOverlay');
+            overlay.classList.add('active');
+
+            // 调用后端智能优化
+            const formData = new FormData();
+            formData.append('image', currentFile);
+
+            fetch('/api/auto-enhance', { method: 'POST', body: formData })
+                .then(r => r.blob())
+                .then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    filteredImg.src = url;
+                    downloadBtn.classList.add('active');
+                    overlay.classList.remove('active');
+
+                    // 下载按钮
+                    downloadBtn.onclick = () => {
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'auto_enhanced.jpg';
+                        a.click();
+                    };
+                })
+                .catch(err => {
+                    overlay.classList.remove('active');
+                    alert('智能优化失败: ' + err);
+                });
+        });
+
+        // AI 抠图（通用函数，mode=fast 或 hd）
+        function doRemoveBg(mode, label) {
+            if (!currentFile) return;
+            currentFilterIdx = -1;
+            filteredTag.textContent = label;
+
+            // 清除卡片高亮
+            document.querySelectorAll('.filter-card').forEach(c => c.classList.remove('active'));
+
+            // 显示处理中遮罩
+            const overlay = document.getElementById('processingOverlay');
+            overlay.classList.add('active');
+            overlay.querySelector('.processing-text').textContent = mode === 'hd' ? '高清抠图中（稍慢）...' : '快速抠图中...';
+
+            // 调用后端抠图
+            const formData = new FormData();
+            formData.append('image', currentFile);
+
+            fetch(`/api/remove-bg?model=${mode}`, { method: 'POST', body: formData })
+                .then(r => r.blob())
+                .then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    filteredImg.src = url;
+                    downloadBtn.classList.add('active');
+                    overlay.classList.remove('active');
+
+                    // 下载按钮
+                    downloadBtn.onclick = () => {
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = mode === 'hd' ? 'removed_bg_hd.png' : 'removed_bg_fast.png';
+                        a.click();
+                    };
+                })
+                .catch(err => {
+                    overlay.classList.remove('active');
+                    alert('AI 抠图失败: ' + err);
+                });
+        }
+
+        removeBgFastBtn.addEventListener('click', () => doRemoveBg('fast', 'AI 快速抠图'));
+        removeBgHdBtn.addEventListener('click', () => doRemoveBg('hd', 'AI 高清抠图'));
+    </script>
+</body>
+</html>
