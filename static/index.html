@@ -75,6 +75,97 @@
             background: #f0f0f2;
             color: #636366;
         }
+        .thumbnail-list {
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            overflow-x: auto;
+            border-top: 1px solid #f0f0f2;
+        }
+        .thumbnail-item {
+            flex-shrink: 0;
+            width: 60px;
+            height: 60px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid transparent;
+            cursor: pointer;
+            opacity: 0.6;
+            transition: all 0.2s;
+        }
+        .thumbnail-item.active {
+            border-color: #007aff;
+            opacity: 1;
+        }
+        .thumbnail-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .batch-panel {
+            padding: 12px 16px;
+            border-top: 1px solid #f0f0f2;
+        }
+        .batch-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .batch-apply-btn {
+            padding: 6px 14px;
+            border-radius: 8px;
+            border: none;
+            background: #007aff;
+            color: #fff;
+            font-size: 13px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .batch-apply-btn:hover {
+            background: #0066d6;
+        }
+        .thumbnail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            gap: 8px;
+        }
+        .grid-item {
+            position: relative;
+            aspect-ratio: 1;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid transparent;
+            cursor: pointer;
+        }
+        .grid-item.selected {
+            border-color: #007aff;
+        }
+        .grid-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .grid-item .checkbox {
+            position: absolute;
+            top: 4px;
+            left: 4px;
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.9);
+            border: 1px solid #ddd;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            color: transparent;
+        }
+        .grid-item.selected .checkbox {
+            background: #007aff;
+            color: #fff;
+            border-color: #007aff;
+        }
         .img-panel img {
             width: 100%;
             display: block;
@@ -601,7 +692,7 @@
                 <div class="upload-hint">支持 JPG / PNG</div>
             </div>
         </div>
-        <input type="file" id="fileInput" accept="image/*">
+        <input type="file" id="fileInput" accept="image/*" multiple>
 
         <div class="loading" id="loading">分析图片中...</div>
 
@@ -631,6 +722,21 @@
                         <span class="intensity-value" id="intensityValue">100%</span>
                     </div>
                     <input type="range" id="intensitySlider" min="0" max="100" value="100" step="1">
+                </div>
+
+                <!-- 多图批量选择列表 -->
+                <div class="batch-panel" id="batchPanel" style="display:none;">
+                    <div class="batch-header">
+                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                            <input type="checkbox" id="selectAllCheckbox">
+                            <span>全选</span>
+                        </label>
+                        <span id="batchCount" style="font-size:12px;color:#86868b;"></span>
+                        <button class="batch-apply-btn" id="batchApplyBtn" style="margin-left:auto;">
+                            ⚡ 应用到选中图片
+                        </button>
+                    </div>
+                    <div class="thumbnail-grid" id="thumbnailGrid"></div>
                 </div>
             </div>
 
@@ -676,6 +782,18 @@
                         🧪 RMBG-2.0
                         <span class="sub">新版模型，自然场景效果好</span>
                     </button>
+                    <!-- 换背景快捷颜色 -->
+                    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e5e7;">
+                        <div style="font-size: 12px; color: #86868b; margin-bottom: 8px;">换背景色：</div>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            <button class="bg-color-btn" data-color="ffffff" style="width: 32px; height: 32px; border-radius: 6px; border: 2px solid #ddd; background: #fff;" title="白色"></button>
+                            <button class="bg-color-btn" data-color="000000" style="width: 32px; height: 32px; border-radius: 6px; border: 2px solid #ddd; background: #000;" title="黑色"></button>
+                            <button class="bg-color-btn" data-color="ff3b30" style="width: 32px; height: 32px; border-radius: 6px; border: 2px solid #ddd; background: #ff3b30;" title="红色"></button>
+                            <button class="bg-color-btn" data-color="007aff" style="width: 32px; height: 32px; border-radius: 6px; border: 2px solid #ddd; background: #007aff;" title="蓝色"></button>
+                            <button class="bg-color-btn" data-color="34c759" style="width: 32px; height: 32px; border-radius: 6px; border: 2px solid #ddd; background: #34c759;" title="绿色"></button>
+                            <button class="bg-color-btn" data-color="ff9500" style="width: 32px; height: 32px; border-radius: 6px; border: 2px solid #ddd; background: #ff9500;" title="橙色"></button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- 智能优化功能区 -->
@@ -683,6 +801,10 @@
                     <button class="auto-enhance-btn" id="autoEnhanceBtn">
                         ✨ 一键智能优化
                         <span class="sub">自动调曝光/白平衡/对比度</span>
+                    </button>
+                    <button class="auto-enhance-btn" id="autoCropBtn">
+                        ✂️ 自动裁剪构图
+                        <span class="sub">按黄金比例自动裁剪</span>
                     </button>
                 </div>
 
@@ -769,6 +891,8 @@
         const filterScrollRow = document.getElementById('filterScrollRow');
 
         let currentFile = null;
+        let batchFiles = []; // 批量处理的文件列表
+        let currentMattingMode = 'recommend'; // 当前抠图模式：fast/hd/v2/recommend
         let currentFilterIdx = -1;
         let filters = [];
 
@@ -790,12 +914,149 @@
         uploadZone.addEventListener('drop', e => {
             e.preventDefault();
             uploadZone.classList.remove('dragover');
-            const file = e.dataTransfer.files[0];
-            if (file) handleFile(file);
+            const files = Array.from(e.dataTransfer.files);
+            if (files.length === 0) return;
+            batchFiles = files;
+            renderThumbnails();
+            handleFile(files[0]);
         });
         fileInput.addEventListener('change', e => {
-            const file = e.target.files[0];
-            if (file) handleFile(file);
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+            batchFiles = files;
+            renderThumbnails();
+            handleFile(files[0]);
+        });
+
+        // 渲染批量选择网格
+        function renderThumbnails() {
+            const panel = document.getElementById('batchPanel');
+            const grid = document.getElementById('thumbnailGrid');
+            const countLabel = document.getElementById('batchCount');
+            const selectAll = document.getElementById('selectAllCheckbox');
+
+            if (batchFiles.length <= 1) {
+                panel.style.display = 'none';
+                return;
+            }
+            panel.style.display = 'block';
+            grid.innerHTML = '';
+            selectedIndices = new Set([0]); // 默认选中第一个
+
+            batchFiles.forEach((file, idx) => {
+                const item = document.createElement('div');
+                item.className = 'grid-item' + (idx === 0 ? ' selected' : '');
+                item.dataset.idx = idx;
+                const img = document.createElement('img');
+                img.src = URL.createObjectURL(file);
+                const checkbox = document.createElement('div');
+                checkbox.className = 'checkbox';
+                checkbox.textContent = '✓';
+                item.appendChild(img);
+                item.appendChild(checkbox);
+                item.addEventListener('click', () => {
+                    if (selectedIndices.has(idx)) {
+                        selectedIndices.delete(idx);
+                        item.classList.remove('selected');
+                    } else {
+                        selectedIndices.add(idx);
+                        item.classList.add('selected');
+                    }
+                    updateBatchCount();
+                    updateSelectAllState();
+                    // 主区域显示选中的第一张图
+                    if (selectedIndices.size > 0) {
+                        const firstSelected = Math.min(...selectedIndices);
+                        handleFile(batchFiles[firstSelected]);
+                    }
+                });
+                grid.appendChild(item);
+            });
+
+            updateBatchCount();
+            updateSelectAllState();
+        }
+
+        let selectedIndices = new Set([0]);
+
+        function updateBatchCount() {
+            document.getElementById('batchCount').textContent =
+                `已选 ${selectedIndices.size} / ${batchFiles.length} 张`;
+        }
+
+        function updateSelectAllState() {
+            const selectAll = document.getElementById('selectAllCheckbox');
+            selectAll.checked = selectedIndices.size === batchFiles.length;
+        }
+
+        // 全选/取消全选
+        document.getElementById('selectAllCheckbox').addEventListener('change', (e) => {
+            document.querySelectorAll('.grid-item').forEach((item, idx) => {
+                if (e.target.checked) {
+                    selectedIndices.add(idx);
+                    item.classList.add('selected');
+                } else {
+                    selectedIndices.delete(idx);
+                    item.classList.remove('selected');
+                }
+            });
+            updateBatchCount();
+        });
+
+        // 批量应用：对选中的图片应用当前选中的功能
+        document.getElementById('batchApplyBtn').addEventListener('click', async () => {
+            if (selectedIndices.size === 0) {
+                alert('请先选择图片');
+                return;
+            }
+            processingOverlay.classList.add('active');
+            const files = Array.from(selectedIndices).map(i => batchFiles[i]);
+            const total = files.length;
+
+            // 根据当前选中的功能标签，决定调用哪个接口
+            const activeTab = document.querySelector('.func-tab.active').dataset.func;
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                processingOverlay.querySelector('.processing-text').textContent =
+                    `处理中 ${i + 1}/${total}: ${file.name}`;
+
+                try {
+                    const formData = new FormData();
+                    formData.append('image', file);
+                    let url = '/api/auto-enhance';
+
+                    if (activeTab === 'removebg') {
+                        if (currentMattingMode === 'recommend') {
+                            // AI 推荐：每张图先推荐再抠图
+                            const recResp = await fetch('/api/recommend-matting', { method: 'POST', body: formData });
+                            const recData = await recResp.json();
+                            url = `/api/remove-bg?model=${recData.model}`;
+                        } else {
+                            // 指定模型：直接用选中的模型
+                            url = `/api/remove-bg?model=${currentMattingMode}`;
+                        }
+                    } else if (activeTab === 'sr') {
+                        url = '/api/super-resolve';
+                    } else if (activeTab === 'filters' && currentFilterIdx >= 0) {
+                        url = `/api/apply?filter=${currentFilterIdx}&intensity=${intensitySlider.value}`;
+                    }
+
+                    const resp = await fetch(url, { method: 'POST', body: formData });
+                    const blob = await resp.blob();
+
+                    // 自动下载
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `edited_${file.name}`;
+                    a.click();
+                } catch (err) {
+                    console.error(`处理 ${file.name} 失败:`, err);
+                }
+            }
+
+            processingOverlay.classList.remove('active');
+            alert(`批量处理完成！共处理 ${total} 张图片`);
         });
 
         function handleFile(file) {
@@ -1011,6 +1272,38 @@
                 });
         });
 
+        // 自动裁剪构图
+        document.getElementById('autoCropBtn').addEventListener('click', () => {
+            if (!currentFile) return;
+            currentFilterIdx = -1;
+            filteredLabel.textContent = '自动裁剪构图';
+            document.querySelectorAll('.filter-card-compact').forEach(c => c.classList.remove('active'));
+            document.getElementById('intensityPanel').style.display = 'none';
+            processingOverlay.classList.add('active');
+            processingOverlay.querySelector('.processing-text').textContent = '自动裁剪中...';
+
+            const formData = new FormData();
+            formData.append('image', currentFile);
+            fetch('/api/auto-crop', { method: 'POST', body: formData })
+                .then(r => r.blob())
+                .then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    filteredImg.src = url;
+                    downloadBtn.classList.add('active');
+                    processingOverlay.classList.remove('active');
+                    downloadBtn.onclick = () => {
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'auto_cropped.jpg';
+                        a.click();
+                    };
+                })
+                .catch(err => {
+                    processingOverlay.classList.remove('active');
+                    alert('自动裁剪失败: ' + err);
+                });
+        });
+
         // AI 抠图（通用函数，mode=fast 或 hd）
         function doRemoveBg(mode, label) {
             if (!currentFile) return;
@@ -1053,12 +1346,13 @@
                 });
         }
 
-        removeBgFastBtn.addEventListener('click', () => doRemoveBg('fast', 'AI 快速抠图'));
-        removeBgHdBtn.addEventListener('click', () => doRemoveBg('hd', 'AI 高清抠图'));
-        document.getElementById('removeBgV2Btn').addEventListener('click', () => doRemoveBg('v2', 'RMBG-2.0 抠图'));
+        removeBgFastBtn.addEventListener('click', () => { currentMattingMode = 'fast'; doRemoveBg('fast', 'AI 快速抠图'); });
+        removeBgHdBtn.addEventListener('click', () => { currentMattingMode = 'hd'; doRemoveBg('hd', 'AI 高清抠图'); });
+        document.getElementById('removeBgV2Btn').addEventListener('click', () => { currentMattingMode = 'v2'; doRemoveBg('v2', 'RMBG-2.0 抠图'); });
 
         // AI 推荐抠图：先分析图片，再自动选模型抠图
         document.getElementById('recommendMattingBtn').addEventListener('click', () => {
+            currentMattingMode = 'recommend';
             if (!currentFile) return;
             processingOverlay.classList.add('active');
             processingOverlay.querySelector('.processing-text').textContent = 'AI 分析图片中...';
@@ -1079,6 +1373,58 @@
                     processingOverlay.classList.remove('active');
                     alert('AI 推荐失败: ' + err);
                 });
+        });
+
+        // 换背景色：先抠图，再把透明区域填充成指定颜色
+        document.querySelectorAll('.bg-color-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (!currentFile) return;
+                const color = btn.dataset.color;
+                processingOverlay.classList.add('active');
+                processingOverlay.querySelector('.processing-text').textContent = '抠图并换背景中...';
+
+                // 先抠图（用推荐模型），再换背景
+                const formData = new FormData();
+                formData.append('image', currentFile);
+                fetch('/api/recommend-matting', { method: 'POST', body: formData })
+                    .then(r => r.json())
+                    .then(data => {
+                        // 用推荐的模型抠图
+                        return fetch(`/api/remove-bg?model=${data.model}`, {
+                            method: 'POST',
+                            body: (() => {
+                                const fd = new FormData();
+                                fd.append('image', currentFile);
+                                return fd;
+                            })()
+                        });
+                    })
+                    .then(r => r.blob())
+                    .then(cutoutBlob => {
+                        // 把抠图结果拿去换背景
+                        const fd = new FormData();
+                        fd.append('image', cutoutBlob, 'cutout.png');
+                        return fetch(`/api/change-bg?color=${color}`, { method: 'POST', body: fd });
+                    })
+                    .then(r => r.blob())
+                    .then(blob => {
+                        const url = URL.createObjectURL(blob);
+                        filteredImg.src = url;
+                        downloadBtn.classList.add('active');
+                        processingOverlay.classList.remove('active');
+                        filteredLabel.textContent = `换背景 #${color}`;
+                        downloadBtn.onclick = () => {
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `bg_${color}.png`;
+                            a.click();
+                        };
+                    })
+                    .catch(err => {
+                        processingOverlay.classList.remove('active');
+                        alert('换背景失败: ' + err);
+                    });
+            });
         });
 
         // AI 超分（Real-ESRGAN 4 倍放大）

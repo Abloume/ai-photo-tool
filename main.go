@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"log"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"ai-photo-tool/analyzer"
+	"ai-photo-tool/autocompose"
 	"ai-photo-tool/filters"
 	"ai-photo-tool/matting"
 	"ai-photo-tool/superresolution"
@@ -161,6 +163,8 @@ func main() {
 	http.HandleFunc("/api/auto-enhance", handleAutoEnhance)
 	http.HandleFunc("/api/remove-bg", handleRemoveBg)
 	http.HandleFunc("/api/recommend-matting", handleRecommendMatting)
+	http.HandleFunc("/api/auto-crop", handleAutoCrop)
+	http.HandleFunc("/api/change-bg", handleChangeBg)
 	http.HandleFunc("/api/super-resolve", handleSuperResolve)
 	http.HandleFunc("/api/reload-check", handleReloadCheck)
 	http.Handle("/", http.FileServer(http.Dir("static")))
@@ -388,10 +392,92 @@ func handleRemoveBg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 确保输出是 RGBA 带透明通道
+	// rmbg 库（v1）输出的是白色背景，不是透明，需要手动转成 alpha
+	// 用 flood fill：从边缘开始，只把和边缘连通的白色区域转成透明
+	// 这样人物身上的白色（不与边缘连通）不会被误判
+	rgbaResult := image.NewRGBA(result.Bounds())
+	b := result.Bounds()
+	imgW, imgH := b.Dx(), b.Dy()
+
+	// 第一步：先把所有像素复制到 RGBA
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, a := result.At(x, y).RGBA()
+			rgbaResult.SetRGBA(x, y, color.RGBA{
+				R: uint8(r >> 8), G: uint8(g >> 8), B: uint8(bl >> 8), A: uint8(a >> 8),
+			})
+		}
+	}
+
+	// 第二步：flood fill 从边缘开始，识别白色背景
+	// visited 记录哪些像素已经处理过
+	visited := make([][]bool, imgH)
+	for i := range visited {
+		visited[i] = make([]bool, imgW)
+	}
+
+	// 判断是否是"白色背景"像素
+	isWhiteBg := func(x, y int) bool {
+		c := rgbaResult.RGBAAt(x, y)
+		// 接近白色的像素才算背景
+		return c.R > 235 && c.G > 235 && c.B > 235
+	}
+
+	// BFS flood fill 队列
+	type point struct{ x, y int }
+	queue := []point{}
+
+	// 从四条边的所有白色像素开始
+	for x := 0; x < imgW; x++ {
+		if isWhiteBg(x, 0) {
+			queue = append(queue, point{x, 0})
+		}
+		if isWhiteBg(x, imgH-1) {
+			queue = append(queue, point{x, imgH - 1})
+		}
+	}
+	for y := 0; y < imgH; y++ {
+		if isWhiteBg(0, y) {
+			queue = append(queue, point{0, y})
+		}
+		if isWhiteBg(imgW-1, y) {
+			queue = append(queue, point{imgW - 1, y})
+		}
+	}
+
+	// 四个方向
+	dirs := []point{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+	transparentCount := 0
+
+	for len(queue) > 0 {
+		p := queue[0]
+		queue = queue[1:]
+		x, y := p.x, p.y
+		if x < 0 || x >= imgW || y < 0 || y >= imgH || visited[y][x] {
+			continue
+		}
+		visited[y][x] = true
+		if !isWhiteBg(x, y) {
+			continue
+		}
+		// 标记为透明
+		c := rgbaResult.RGBAAt(x, y)
+		rgbaResult.SetRGBA(x, y, color.RGBA{R: c.R, G: c.G, B: c.B, A: 0})
+		transparentCount++
+		// 扩散到邻居
+		for _, d := range dirs {
+			queue = append(queue, point{x + d.x, y + d.y})
+		}
+	}
+
+	fmt.Printf("🔍 抠图调试: 总像素=%d, flood fill 透明像素=%d, result类型=%T\n",
+		imgW*imgH, transparentCount, result)
+
 	// 返回 PNG（带透明通道）
 	w.Header().Set("Content-Type", "image/png")
 	var buf bytes.Buffer
-	png.Encode(&buf, result)
+	png.Encode(&buf, rgbaResult)
 	w.Write(buf.Bytes())
 }
 
@@ -421,6 +507,105 @@ func handleRecommendMatting(w http.ResponseWriter, r *http.Request) {
 		"model":  modelType,
 		"reason": reason,
 	})
+}
+
+// handleAutoCrop 自动裁剪：按黄金比例/三分法自动构图
+func handleAutoCrop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+
+	file, _, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "读取图片失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		http.Error(w, "解码图片失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// 按黄金比例自动裁剪
+	result := autocompose.AutoCrop(img, 0)
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	var buf bytes.Buffer
+	jpeg.Encode(&buf, result, &jpeg.Options{Quality: 90})
+	w.Write(buf.Bytes())
+}
+
+// handleChangeBg 换背景：把抠图后的透明 PNG 填充成指定颜色
+// query 参数：color=rrggbb（十六进制颜色，如 ff0000 红色）
+func handleChangeBg(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+
+	colorHex := r.URL.Query().Get("color")
+	if colorHex == "" {
+		colorHex = "ffffff" // 默认白色
+	}
+
+	// 解析十六进制颜色
+	var r8, g8, b8 uint8
+	fmt.Sscanf(colorHex, "%02x%02x%02x", &r8, &g8, &b8)
+
+	file, _, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "读取图片失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		http.Error(w, "解码图片失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// 遍历像素，把透明区域填充成指定颜色
+	b := img.Bounds()
+	dst := image.NewRGBA(b)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			pr, pg, pb, pa := img.At(x, y).RGBA()
+			alpha := pa >> 8 // 0-255
+			if alpha < 128 {
+				// 半透明/透明区域，填充背景色
+				// （用 alpha 混合：背景色 * (1-alpha) + 原图 * alpha，过渡更自然）
+				bgR := float64(r8) * (1 - float64(alpha)/255)
+				bgG := float64(g8) * (1 - float64(alpha)/255)
+				bgB := float64(b8) * (1 - float64(alpha)/255)
+				fgR := float64(pr>>8) * (float64(alpha) / 255)
+				fgG := float64(pg>>8) * (float64(alpha) / 255)
+				fgB := float64(pb>>8) * (float64(alpha) / 255)
+				dst.SetRGBA(x, y, color.RGBA{
+					R: uint8(bgR + fgR),
+					G: uint8(bgG + fgG),
+					B: uint8(bgB + fgB),
+					A: 255,
+				})
+			} else {
+				// 前景区域，保留原图
+				dst.SetRGBA(x, y, color.RGBA{
+					R: uint8(pr >> 8),
+					G: uint8(pg >> 8),
+					B: uint8(pb >> 8),
+					A: 255,
+				})
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	var buf bytes.Buffer
+	png.Encode(&buf, dst)
+	w.Write(buf.Bytes())
 }
 
 // handleSuperResolve Real-ESRGAN 超分：上传图片，返回 4 倍放大的图
