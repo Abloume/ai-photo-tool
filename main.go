@@ -24,14 +24,41 @@ import (
 
 	"ai-photo-tool/analyzer"
 	"ai-photo-tool/filters"
+	"ai-photo-tool/matting"
+	"ai-photo-tool/superresolution"
 
 	"github.com/josuedeavila/rmbg"
 	ort "github.com/yalue/onnxruntime_go"
 )
 
-// 全局抠图器：fast = 轻量版（快速），hd = 完整版（高清）
+// BackgroundRemover 统一抠图接口：v1（rmbg 库）和 v2（matting/RMBG-2.0）都实现它。
+// 这样 handler 不用关心底层是哪个版本，切换版本只改启动时的选择逻辑。
+type BackgroundRemover interface {
+	RemoveBackground(image.Image) (image.Image, error)
+}
+
+// v2Adapter 把 matting.Matting（返回 *image.RGBA）适配成 BackgroundRemover（返回 image.Image）。
+// 【JS→Go 差异】Go 没有结构类型推断，返回值类型不同就不满足接口，得手动包一层。
+type v2Adapter struct {
+	m *matting.Matting
+}
+
+func (a *v2Adapter) RemoveBackground(img image.Image) (image.Image, error) {
+	return a.m.RemoveBackground(img)
+}
+
+// v1 抠图器（旧版 rmbg 库，保留不删）
 var removerFast *rmbg.RemBG
 var removerHD *rmbg.RemBG
+
+// v2 抠图器（新版 matting 包，RMBG-2.0）
+var removerV2 *matting.Matting
+
+// 当前实际生效的抠图器（启动时选 v2，失败回退 v1）
+var activeRemover BackgroundRemover
+
+// 超分器（Real-ESRGAN）
+var sr *superresolution.SuperResolution
 
 // 全局滤镜列表（启动时加载一次）
 var presetFilters = filters.Presets()
@@ -89,18 +116,41 @@ func main() {
 	// 必须在任何 rmbg.New() 之前调用，否则 ORT 环境已按系统路径初始化完就晚了
 	initORTLib()
 
-	// 加载两个抠图模型：轻量版 + 完整版
+	// 加载 v1 抠图模型（旧版 rmbg 库，保留不删，作为默认和 fallback）
 	removerFast = initRemover(*fastModelFlag)
 	removerHD = initRemover(*hdModelFlag)
 
-	if removerFast == nil && removerHD == nil {
-		fmt.Println("ℹ️  AI 抠图未启用（无可用模型）")
-	} else if removerHD != nil && removerFast != nil {
-		fmt.Println("✅  AI 抠图已就绪（快速版 + 高清版）")
-	} else if removerHD != nil {
-		fmt.Println("✅  AI 抠图已就绪（仅高清版）")
+	// 加载 v2 抠图模型（新版 RMBG-2.0）
+	// 目前 v2 效果待调优，默认不启用；需 ?model=v2 才走
+	removerV2Instance, v2Err := matting.NewRMBG2("models/rmbg-2.0.onnx")
+	if v2Err == nil {
+		removerV2 = removerV2Instance
+		fmt.Println("ℹ️  RMBG-2.0 已加载（需 ?model=v2 启用，默认走 v1）")
 	} else {
-		fmt.Println("✅  AI 抠图已就绪（仅快速版）")
+		fmt.Printf("ℹ️  RMBG-2.0 加载失败（%v）\n", v2Err)
+	}
+
+	// 默认 activeRemover 指向 v1（优先 hd，没有就 fast）
+	if removerHD != nil {
+		activeRemover = removerHD
+	} else if removerFast != nil {
+		activeRemover = removerFast
+	}
+
+	// 加载 Real-ESRGAN 超分模型（失败不阻塞启动，只是超分不可用）
+	srInstance, err := superresolution.NewRealESRGAN("models/realesrgan-x4.onnx")
+	if err != nil {
+		fmt.Printf("⚠️  超分模型加载失败: %v\n", err)
+		sr = nil
+	} else {
+		sr = srInstance
+		fmt.Println("✅  Real-ESRGAN 超分已就绪（4 倍放大）")
+	}
+
+	if activeRemover == nil {
+		fmt.Println("ℹ️  AI 抠图未启用（无可用模型）")
+	} else {
+		fmt.Println("✅  AI 抠图已就绪")
 	}
 
 	// 路由注册
@@ -110,6 +160,8 @@ func main() {
 	http.HandleFunc("/api/apply", handleApply)
 	http.HandleFunc("/api/auto-enhance", handleAutoEnhance)
 	http.HandleFunc("/api/remove-bg", handleRemoveBg)
+	http.HandleFunc("/api/recommend-matting", handleRecommendMatting)
+	http.HandleFunc("/api/super-resolve", handleSuperResolve)
 	http.HandleFunc("/api/reload-check", handleReloadCheck)
 	http.Handle("/", http.FileServer(http.Dir("static")))
 
@@ -276,30 +328,38 @@ func handleAutoEnhance(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRemoveBg AI 抠图：上传图片，返回透明背景 PNG
-// query 参数：model=fast（轻量快速，默认）/ hd（完整版高清）
+// query 参数：
+//   - fast  → v1 u2netp（快速版，默认）
+//   - hd    → v1 u2net（高清版，更干净）
+//   - v2    → v2 RMBG-2.0（新版，效果待调优）
 func handleRemoveBg(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// 选择模型：默认 fast，hd 延迟加载
+	// 选择抠图器
+	var remover BackgroundRemover
 	modelType := r.URL.Query().Get("model")
-	var remover *rmbg.RemBG
-	if modelType == "hd" {
-		// 高清模型延迟加载：第一次调用时才初始化
-		if removerHD == nil {
-			fmt.Println("⏳  正在加载高清抠图模型（首次调用稍慢）...")
-			removerHD = initRemover(*hdModelFlag)
-		}
+	switch modelType {
+	case "hd":
 		if removerHD != nil {
 			remover = removerHD
 		} else {
-			fmt.Println("⚠️  高清模型加载失败，回退到快速模型")
-			remover = removerFast
+			remover = activeRemover
 		}
-	} else {
-		remover = removerFast
+	case "v2":
+		if removerV2 != nil {
+			remover = &v2Adapter{m: removerV2}
+		} else {
+			remover = activeRemover
+		}
+	default: // fast 或空
+		if removerFast != nil {
+			remover = removerFast
+		} else {
+			remover = activeRemover
+		}
 	}
 
 	if remover == nil {
@@ -332,5 +392,69 @@ func handleRemoveBg(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	var buf bytes.Buffer
 	png.Encode(&buf, result)
+	w.Write(buf.Bytes())
+}
+
+// handleRecommendMatting AI 分析图片，推荐最合适的抠图模型
+func handleRecommendMatting(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+
+	file, _, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "读取图片失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		http.Error(w, "解码图片失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	modelType, reason := matting.RecommendMattingModel(img)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"model":  modelType,
+		"reason": reason,
+	})
+}
+
+// handleSuperResolve Real-ESRGAN 超分：上传图片，返回 4 倍放大的图
+func handleSuperResolve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	if sr == nil {
+		http.Error(w, "超分模型未初始化", http.StatusServiceUnavailable)
+		return
+	}
+
+	file, _, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "读取图片失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		http.Error(w, "解码图片失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	result, err := sr.Upscale(img)
+	if err != nil {
+		http.Error(w, "超分失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	var buf bytes.Buffer
+	jpeg.Encode(&buf, result, &jpeg.Options{Quality: 90})
 	w.Write(buf.Bytes())
 }

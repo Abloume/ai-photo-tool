@@ -641,6 +641,7 @@
                     <button class="func-tab active" data-func="filters">🎨 滤镜</button>
                     <button class="func-tab" data-func="removebg">✂️ 抠图</button>
                     <button class="func-tab" data-func="enhance">✨ 优化</button>
+                    <button class="func-tab" data-func="sr">🔍 超分</button>
                 </div>
 
                 <!-- 滤镜功能区 -->
@@ -659,13 +660,21 @@
 
                 <!-- 抠图功能区 -->
                 <div class="func-content" id="funcRemoveBg" style="display:none;">
+                    <button class="ai-tool-btn" id="recommendMattingBtn" style="border-color: #007aff; background: #f0f7ff;">
+                        🤖 AI 推荐抠图
+                        <span class="sub">自动分析图片，选最合适的模型</span>
+                    </button>
                     <button class="ai-tool-btn" id="removeBgFastBtn">
                         ⚡ 快速抠图
-                        <span class="sub">1-2 秒出图</span>
+                        <span class="sub">u2netp，1-2 秒出图</span>
                     </button>
                     <button class="ai-tool-btn" id="removeBgHdBtn">
                         ✨ 高清抠图
-                        <span class="sub">边缘更精细</span>
+                        <span class="sub">u2net，边缘更精细</span>
+                    </button>
+                    <button class="ai-tool-btn" id="removeBgV2Btn" style="border-style: dashed;">
+                        🧪 RMBG-2.0
+                        <span class="sub">新版模型，自然场景效果好</span>
                     </button>
                 </div>
 
@@ -674,6 +683,14 @@
                     <button class="auto-enhance-btn" id="autoEnhanceBtn">
                         ✨ 一键智能优化
                         <span class="sub">自动调曝光/白平衡/对比度</span>
+                    </button>
+                </div>
+
+                <!-- 超分功能区 -->
+                <div class="func-content" id="funcSR" style="display:none;">
+                    <button class="auto-enhance-btn" id="superResolveBtn">
+                        🔍 AI 超分放大
+                        <span class="sub">Real-ESRGAN 4 倍放大，模糊图变清晰</span>
                     </button>
                 </div>
 
@@ -723,7 +740,8 @@
         const funcContents = {
             filters: document.getElementById('funcFilters'),
             removebg: document.getElementById('funcRemoveBg'),
-            enhance: document.getElementById('funcEnhance')
+            enhance: document.getElementById('funcEnhance'),
+            sr: document.getElementById('funcSR')
         };
 
         funcTabs.forEach(tab => {
@@ -1037,6 +1055,64 @@
 
         removeBgFastBtn.addEventListener('click', () => doRemoveBg('fast', 'AI 快速抠图'));
         removeBgHdBtn.addEventListener('click', () => doRemoveBg('hd', 'AI 高清抠图'));
+        document.getElementById('removeBgV2Btn').addEventListener('click', () => doRemoveBg('v2', 'RMBG-2.0 抠图'));
+
+        // AI 推荐抠图：先分析图片，再自动选模型抠图
+        document.getElementById('recommendMattingBtn').addEventListener('click', () => {
+            if (!currentFile) return;
+            processingOverlay.classList.add('active');
+            processingOverlay.querySelector('.processing-text').textContent = 'AI 分析图片中...';
+
+            // 第一步：请求推荐
+            const formData = new FormData();
+            formData.append('image', currentFile);
+            fetch('/api/recommend-matting', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    processingOverlay.querySelector('.processing-text').textContent =
+                        `推荐：${data.reason}，正在抠图...`;
+                    // 第二步：用推荐的模型抠图
+                    const modelNames = { fast: '快速抠图', hd: '高清抠图', v2: 'RMBG-2.0' };
+                    doRemoveBg(data.model, 'AI 推荐：' + (modelNames[data.model] || data.model));
+                })
+                .catch(err => {
+                    processingOverlay.classList.remove('active');
+                    alert('AI 推荐失败: ' + err);
+                });
+        });
+
+        // AI 超分（Real-ESRGAN 4 倍放大）
+        const superResolveBtn = document.getElementById('superResolveBtn');
+        superResolveBtn.addEventListener('click', () => {
+            if (!currentFile) return;
+            currentFilterIdx = -1;
+            filteredLabel.textContent = 'AI 超分放大';
+            document.querySelectorAll('.filter-card-compact').forEach(c => c.classList.remove('active'));
+            document.getElementById('intensityPanel').style.display = 'none';
+            processingOverlay.classList.add('active');
+            processingOverlay.querySelector('.processing-text').textContent = '超分放大中（稍慢）...';
+
+            const formData = new FormData();
+            formData.append('image', currentFile);
+            fetch('/api/super-resolve', { method: 'POST', body: formData })
+                .then(r => r.blob())
+                .then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    filteredImg.src = url;
+                    downloadBtn.classList.add('active');
+                    processingOverlay.classList.remove('active');
+                    downloadBtn.onclick = () => {
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'super_resolved.jpg';
+                        a.click();
+                    };
+                })
+                .catch(err => {
+                    processingOverlay.classList.remove('active');
+                    alert('超分失败: ' + err);
+                });
+        });
 
         // 滤镜强度滑块拖动事件
         let intensityTimer;
