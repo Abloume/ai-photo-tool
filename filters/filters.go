@@ -12,7 +12,22 @@ import (
 	"image/color"
 	_ "image/jpeg"
 	"math"
+	"sync"
 )
+
+// hashNoise 基于像素坐标的确定性伪随机数，返回 [-1, 1]。
+//
+// 【JS→Go 差异】
+// - JS 里加噪点直接 Math.random()，但那样并行/重算结果都不一样，没法复现
+// - Go 这里用整数哈希 (x,y) 算出固定噪声：同一像素永远得到同一个值
+// - 好处：① 并行写 dst 不需要锁（每个 goroutine 自己算自己的）② 同图同参数输出一致
+func hashNoise(x, y int) float64 {
+	n := uint32(x)*73856093 ^ uint32(y)*19349663
+	n = (n ^ (n >> 13)) * 1274126177
+	n = n ^ (n >> 16)
+	// n ∈ [0, 2^32)，映射到 [-1, 1)
+	return float64(n)/2147483648.0 - 1.0
+}
 
 // Filter 滤镜参数定义
 // 所有范围值设计为 -100 ~ +100 或 0 ~ 200，便于前端滑块映射
@@ -56,52 +71,77 @@ func Apply(src image.Image, f Filter) *image.RGBA {
 	w := bounds.Dx()
 	h := bounds.Dy()
 
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			r, g, b, a := src.At(x, y).RGBA()
-			// RGBA() 返回 0-65535 的值，需要转成 0-255
-			// 【JS→Go 差异】JS 的 Uint8ClampedArray 天然就是 0-255，不用移位
-			origR := float64(r >> 8)
-			origG := float64(g >> 8)
-			origB := float64(b >> 8)
-			a8 := float64(a >> 8)
-
-			// 逐步应用各项调整
-			r8, g8, b8 := origR, origG, origB
-			r8, g8, b8 = adjustTemperature(r8, g8, b8, f.Temperature)
-			r8, g8, b8 = adjustTint(r8, g8, b8, f.Tint)
-			r8, g8, b8 = adjustSaturation(r8, g8, b8, f.Saturation)
-			r8, g8, b8 = adjustContrast(r8, g8, b8, f.Contrast)
-			r8, g8, b8 = adjustBrightness(r8, g8, b8, f.Brightness)
-			r8, g8, b8 = adjustHighlightsShadows(r8, g8, b8, f.Highlights, f.Shadows)
-			r8, g8, b8 = splitTone(r8, g8, b8, f)
-			r8, g8, b8 = applyVignette(r8, g8, b8, x, y, w, h, f.Vignette)
-
-			// 按滤镜强度混合原图和调整结果
-			// intensity=100 完全用滤镜，intensity=0 完全用原图
-			// 默认值 100（未设置时用完整滤镜效果）
-			intensity := f.Intensity
-			if intensity == 0 { intensity = 100 }
-			intensity /= 100.0
-			if intensity < 0 { intensity = 0 }
-			if intensity > 1 { intensity = 1 }
-			r8 = origR*(1-intensity) + r8*intensity
-			g8 = origG*(1-intensity) + g8*intensity
-			b8 = origB*(1-intensity) + b8*intensity
-
-			// clamping 到 0-255
-			r8 = clamp255(r8)
-			g8 = clamp255(g8)
-			b8 = clamp255(b8)
-
-			dst.Set(x, y, color.RGBA{
-				R: uint8(r8),
-				G: uint8(g8),
-				B: uint8(b8),
-				A: uint8(a8),
-			})
-		}
+	// 预计算混合强度（与像素无关，避免每行重复算）
+	intensity := f.Intensity
+	if intensity == 0 {
+		intensity = 100
 	}
+	intensity /= 100.0
+	if intensity < 0 {
+		intensity = 0
+	}
+	if intensity > 1 {
+		intensity = 1
+	}
+
+	// 【JS→Go 差异】
+	// - JS 是单线程，只能一个 for 循环跑完所有像素，大图会卡主线程
+	// - Go 开 goroutine：每一行 y 一个 goroutine，写到 dst 不同行互不冲突
+	// - sync.WaitGroup 等所有行写完再返回；Go 调度器自动把 goroutine 排到多核
+	var wg sync.WaitGroup
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		wg.Add(1)
+		go func(y int) {
+			defer wg.Done()
+			for x := bounds.Min.X; x < bounds.Max.X; x++ {
+				r, g, b, a := src.At(x, y).RGBA()
+				// RGBA() 返回 0-65535 的值，需要转成 0-255
+				origR := float64(r >> 8)
+				origG := float64(g >> 8)
+				origB := float64(b >> 8)
+				a8 := float64(a >> 8)
+
+				// 逐步应用各项调整
+				r8, g8, b8 := origR, origG, origB
+				r8, g8, b8 = adjustTemperature(r8, g8, b8, f.Temperature)
+				r8, g8, b8 = adjustTint(r8, g8, b8, f.Tint)
+				r8, g8, b8 = adjustSaturation(r8, g8, b8, f.Saturation)
+				r8, g8, b8 = adjustContrast(r8, g8, b8, f.Contrast)
+				r8, g8, b8 = adjustBrightness(r8, g8, b8, f.Brightness)
+				r8, g8, b8 = adjustHighlightsShadows(r8, g8, b8, f.Highlights, f.Shadows)
+				r8, g8, b8 = splitTone(r8, g8, b8, f)
+				r8, g8, b8 = applyVignette(r8, g8, b8, x, y, w, h, f.Vignette)
+
+				// 胶片颗粒：在亮度三通道上叠加确定性噪点，不改色相
+				// Grain=0 无颗粒，100 最强（±约14 亮度）
+				if f.Grain > 0 {
+					n := hashNoise(x, y)
+					amt := f.Grain / 100.0 * 14
+					r8 += n * amt
+					g8 += n * amt
+					b8 += n * amt
+				}
+
+				// 按滤镜强度混合原图和调整结果
+				r8 = origR*(1-intensity) + r8*intensity
+				g8 = origG*(1-intensity) + g8*intensity
+				b8 = origB*(1-intensity) + b8*intensity
+
+				// clamping 到 0-255
+				r8 = clamp255(r8)
+				g8 = clamp255(g8)
+				b8 = clamp255(b8)
+
+				dst.Set(x, y, color.RGBA{
+					R: uint8(r8),
+					G: uint8(g8),
+					B: uint8(b8),
+					A: uint8(a8),
+				})
+			}
+		}(y)
+	}
+	wg.Wait()
 
 	return dst
 }
@@ -216,6 +256,10 @@ func applyVignette(r, g, b float64, x, y, w, h int, strength float64) (float64, 
 
 // cloud 定义一朵云的位置和大小（归一化坐标 0-1）
 // cloudBlob 一朵积云由多个小的云瓣叠加而成，形状更自然
+//
+// TODO(废弃)：天空替换曾尝试用这套云端点做"上部画云"，但纯启发式效果太差
+// （阴天/逆光/建筑边缘全翻车），已从功能中移除，数据先留着。
+// 后续若重启，应接专用 sky-segmentation ONNX 模型做 mask，不要再用规则判定。
 type cloudBlob struct {
 	cx, cy  float64 // 中心位置（归一化 0-1）
 	rx, ry  float64 // 水平/垂直半径
@@ -224,6 +268,8 @@ type cloudBlob struct {
 
 // 预定义的云朵布局：每朵云由多层云瓣垂直叠加，形成有厚度的积云
 // 云都集中在图片上部 5%-22% 的区域，避免压到地面景物
+//
+// 注意：当前没有任何代码引用 presetClouds，仅作废弃方案存档。
 var presetClouds = []cloudBlob{
 	// 第一朵云（左上方）— 上下3层，有厚度
 	{cx: 0.12, cy: 0.06, rx: 0.05, ry: 0.015, opacity: 0.4},

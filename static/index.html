@@ -468,6 +468,22 @@
             overflow-x: auto;
             padding-bottom: 8px;
         }
+
+        /* 智能推荐区 */
+        .recommend-title {
+            font-size: 12px;
+            color: #636366;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        .recommend-row {
+            margin-bottom: 4px;
+        }
+        .recommend-divider {
+            height: 1px;
+            background: #f0f0f2;
+            margin: 12px 0;
+        }
         .filter-scroll-row::-webkit-scrollbar {
             height: 6px;
         }
@@ -629,6 +645,12 @@
 
                 <!-- 滤镜功能区 -->
                 <div class="func-content" id="funcFilters">
+                    <!-- 智能推荐（上传图片后出现，置顶） -->
+                    <div id="recommendSection" style="display:none;">
+                        <div class="recommend-title">✨ 为你推荐</div>
+                        <div class="filter-scroll-row recommend-row" id="recommendRow"></div>
+                        <div class="recommend-divider"></div>
+                    </div>
                     <!-- 滤镜分类标签 -->
                     <div class="filter-cats" id="filterTabs"></div>
                     <!-- 滤镜卡片横向滚动 -->
@@ -763,42 +785,43 @@
                 .then(r => r.json())
                 .then(data => {
                     loading.classList.remove('active');
-                    // 分析结果暂时不展示，后面再加
+                    // 拿到后端推荐的 Top3 滤镜，渲染到滤镜栏顶部
+                    renderRecommend(data.recommend);
                 })
                 .catch(err => {
                     loading.classList.remove('active');
                 });
         }
 
-        function showAnalysis(stats) {
-            analysisBar.classList.add('active');
-            const tags = [];
-            tags.push(`色温: ${Math.round(stats.colorTemp)}K`);
-            tags.push(`亮度: ${Math.round(stats.avgLum)}`);
-            tags.push(`饱和度: ${(stats.saturation * 100).toFixed(0)}%`);
-            if (stats.isDark) tags.push('偏暗');
-            if (stats.isBright) tags.push('偏亮');
-            if (stats.isWarm) tags.push('偏暖');
-            if (stats.isCool) tags.push('偏冷');
-            statsRow.innerHTML = tags.map(t => `<span class="stat-item">${t}</span>`).join('');
-        }
+        // 渲染"为你推荐"：后端根据图片色彩特征算出来的 Top3
+        function renderRecommend(recommendList) {
+            const section = document.getElementById('recommendSection');
+            const row = document.getElementById('recommendRow');
+            row.innerHTML = '';
 
-        function renderRecommend(recommendFilters) {
-            recommendRow.innerHTML = '';
-            recommendFilters.forEach((f, i) => {
-                // 按名称匹配索引（JSON 反序列化后引用不同，indexOf 找不到）
+            if (!recommendList || recommendList.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+
+            recommendList.forEach(f => {
+                // JSON 反序列化后对象引用不同，按名称找回全量滤镜里的索引
                 const idx = filters.findIndex(ff => ff.name === f.name);
+                if (idx < 0) return;
+
                 const card = document.createElement('div');
-                card.className = 'filter-card';
+                card.className = 'filter-card-compact';
                 card.dataset.idx = idx;
+                // 推荐卡片统一用紫蓝渐变，和普通滤镜卡区分开
                 card.innerHTML = `
                     <div class="thumb" style="background: linear-gradient(135deg, #667eea, #764ba2)"></div>
                     <div class="name">${f.name}</div>
-                    <div class="desc">${f.description}</div>
                 `;
                 card.addEventListener('click', () => applyFilter(idx));
-                recommendRow.appendChild(card);
+                row.appendChild(card);
             });
+
+            section.style.display = recommendRow.children.length ? 'block' : 'none';
         }
 
         function renderFilterLibrary() {

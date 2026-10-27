@@ -10,6 +10,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -31,6 +32,14 @@ var removerHD *rmbg.RemBG
 // 全局滤镜列表（启动时加载一次）
 var presetFilters = filters.Presets()
 
+// 命令行参数：端口和模型路径可配，不用改代码重新编译
+// 【JS→Go 差异】Node 服务常用 process.env 读环境变量，Go 标准库用 flag 包
+var (
+	addrFlag     = flag.String("addr", ":8080", "服务监听地址，例如 :8080 或 127.0.0.1:9000")
+	fastModelFlag = flag.String("fast-model", "models/u2netp.onnx", "快速抠图 ONNX 模型路径")
+	hdModelFlag   = flag.String("hd-model", "models/u2net.onnx", "高清抠图 ONNX 模型路径")
+)
+
 func initRemover(modelPath string) *rmbg.RemBG {
 	r, err := rmbg.New(&rmbg.Config{
 		ModelPath:         modelPath,
@@ -45,9 +54,11 @@ func initRemover(modelPath string) *rmbg.RemBG {
 }
 
 func main() {
+	flag.Parse()
+
 	// 加载两个抠图模型：轻量版 + 完整版
-	removerFast = initRemover("models/u2netp.onnx")
-	removerHD = initRemover("models/u2net.onnx")
+	removerFast = initRemover(*fastModelFlag)
+	removerHD = initRemover(*hdModelFlag)
 
 	if removerFast == nil && removerHD == nil {
 		fmt.Println("ℹ️  AI 抠图未启用（无可用模型）")
@@ -68,10 +79,9 @@ func main() {
 	http.HandleFunc("/api/remove-bg", handleRemoveBg)
 	http.Handle("/", http.FileServer(http.Dir("static")))
 
-	addr := ":8080"
-	fmt.Printf("自动滤镜服务已启动: http://localhost%s\n", addr)
+	fmt.Printf("自动滤镜服务已启动: http://localhost%s\n", *addrFlag)
 	fmt.Printf("内置滤镜数量: %d 个\n", len(presetFilters))
-	log.Fatal(http.ListenAndServe(addr, nil))
+	log.Fatal(http.ListenAndServe(*addrFlag, nil))
 }
 
 // handleListFilters 返回全部预设滤镜列表
@@ -230,7 +240,7 @@ func handleRemoveBg(w http.ResponseWriter, r *http.Request) {
 		// 高清模型延迟加载：第一次调用时才初始化
 		if removerHD == nil {
 			fmt.Println("⏳  正在加载高清抠图模型（首次调用稍慢）...")
-			removerHD = initRemover("models/u2net.onnx")
+			removerHD = initRemover(*hdModelFlag)
 		}
 		if removerHD != nil {
 			remover = removerHD

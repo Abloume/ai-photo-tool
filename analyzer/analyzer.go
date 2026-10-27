@@ -9,6 +9,7 @@ package analyzer
 import (
 	"image"
 	"math"
+	"sync"
 
 	"ai-photo-tool/filters"
 )
@@ -34,39 +35,66 @@ func Analyze(img image.Image) ImageStats {
 	bounds := img.Bounds()
 	w := bounds.Dx()
 	h := bounds.Dy()
-	_ = w // 保留宽高变量，后续扩展用
-	_ = h
-
-	var sumR, sumG, sumB float64
-	var sumSat float64
 
 	// 采样步长：大图不用遍历每个像素，步长采样就够统计用
-	// 【JS→Go 差异】JS 处理大图会卡主线程，Go 这里可以轻松做并行
 	step := 2
 	if w*h > 4000000 { // 400万像素以上加大步长
 		step = 4
 	}
 
-	count := 0
+	// 【JS→Go 差异】
+	// - JS 单线程累加 sumR/sumG，大图卡主线程
+	// - Go 按行开 goroutine，每行把结果写进自己的 slot（无锁）
+	// - 最后主线程归并所有行的累加值；不用 mutex 是因为不同 goroutine 写不同下标
+	type rowAcc struct {
+		sumR, sumG, sumB, sumSat float64
+		count                    int
+	}
+	rows := 0
 	for y := bounds.Min.Y; y < bounds.Max.Y; y += step {
-		for x := bounds.Min.X; x < bounds.Max.X; x += step {
-			r, g, b, _ := img.At(x, y).RGBA()
-			r8 := float64(r >> 8)
-			g8 := float64(g >> 8)
-			b8 := float64(b >> 8)
+		rows++
+	}
+	accs := make([]rowAcc, rows)
 
-			sumR += r8
-			sumG += g8
-			sumB += b8
+	var wg sync.WaitGroup
+	idx := 0
+	for y := bounds.Min.Y; y < bounds.Max.Y; y += step {
+		wg.Add(1)
+		go func(y, slot int) {
+			defer wg.Done()
+			var acc rowAcc
+			for x := bounds.Min.X; x < bounds.Max.X; x += step {
+				r, g, b, _ := img.At(x, y).RGBA()
+				r8 := float64(r >> 8)
+				g8 := float64(g >> 8)
+				b8 := float64(b >> 8)
 
-			// 计算该像素饱和度
-			maxC := math.Max(math.Max(r8, g8), b8)
-			minC := math.Min(math.Min(r8, g8), b8)
-			if maxC > 0 {
-				sumSat += (maxC - minC) / maxC
+				acc.sumR += r8
+				acc.sumG += g8
+				acc.sumB += b8
+
+				maxC := math.Max(math.Max(r8, g8), b8)
+				minC := math.Min(math.Min(r8, g8), b8)
+				if maxC > 0 {
+					acc.sumSat += (maxC - minC) / maxC
+				}
+				acc.count++
 			}
-			count++
-		}
+			accs[slot] = acc
+		}(y, idx)
+		idx++
+	}
+	wg.Wait()
+
+	// 归并所有行
+	var sumR, sumG, sumB, sumSat float64
+	count := 0
+	for _, a := range accs {
+		sumR += a.sumR
+		sumG += a.sumG
+		sumB += a.sumB
+		sumSat += a.sumSat
+		count += a.count
 	}
 
 	avgR := sumR / float64(count)
@@ -120,9 +148,10 @@ func estimateCCT(r, g, b float64) float64 {
 	xi := x / sum
 	yi := y / sum
 
-	// McCamy 公式：CCT = 449*(xi-0.3320)^3 + 3525*(xi-0.3320)^2 + 6823.3*(xi-0.3320) + 5520.33
-	// 实际更常用 uv 坐标版，这里用简化的 xy 版够用
-	n := (xi - 0.3366) / (yi - 0.1735)
+	// McCamy 公式：CCT = 449*n³ + 3525*n² + 6823.3*n + 5520.33
+	// n = (x - xe) / (ye - y)，标准常数 xe=0.3320, ye=0.1858
+	// 【JS→Go 差异/历史 bug】分母曾误写成 (y - ye)，导致偏红图算成冷色、偏蓝图算成暖色，冷暖标签整体颠倒；已修正符号
+	n := (xi - 0.3320) / (0.1858 - yi)
 	cct := 449.0*math.Pow(n, 3) + 3525.0*math.Pow(n, 2) + 6823.3*n + 5520.33
 
 	// 限制合理范围
