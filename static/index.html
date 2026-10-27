@@ -687,6 +687,25 @@
     </div>
 
     <script>
+        // 开发模式：轮询版本接口，后端重启或 HTML 变了就自动刷新页面
+        // 改 .go → air 重启服务 → startup 变；改 index.html → htmlMtime 变
+        let lastVersion = null;
+        async function checkReload() {
+            try {
+                const res = await fetch('/api/reload-check?t=' + Date.now());
+                const v = await res.json();
+                if (lastVersion && (v.startup !== lastVersion.startup || v.htmlMtime !== lastVersion.htmlMtime)) {
+                    location.reload();
+                    return;
+                }
+                lastVersion = v;
+            } catch (e) {
+                // 服务正在重启，请求失败就忽略，等下一轮
+            }
+        }
+        setInterval(checkReload, 2000);
+        checkReload();
+
         const uploadZone = document.getElementById('uploadZone');
         const fileInput = document.getElementById('fileInput');
         const originalImg = document.getElementById('originalImg');

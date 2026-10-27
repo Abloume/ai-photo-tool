@@ -1,0 +1,39 @@
+# air 热重载配置：开发模式用 `make dev` 启动
+# 文档: https://github.com/air-verse/air
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # 编译命令（字段名是 cmd，不是 command）
+  cmd = "go build -o tmp/ai-photo-tool ."
+  # 要运行的二进制（数组形式）
+  entrypoint = ["tmp/ai-photo-tool"]
+  bin = "tmp/ai-photo-tool"
+  args_bin = []
+  # 改完文件等 800ms 再编译，避免保存瞬间多次触发
+  delay = 800
+  # 不监听这些目录（大模型、动态库、git 没必要盯）
+  exclude_dir = ["tmp", "bin", "models", "libs", ".git", "scripts", "assets", "vendor", "testdata"]
+  exclude_regex = ["_test.go"]
+  # 只盯这些后缀
+  include_ext = ["go", "html"]
+  # 旧进程先 interrupt 再杀
+  send_interrupt = true
+  stop_on_error = true
+  log = "tmp/air-build.log"
+
+[color]
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  mode = ""
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  main_only = false
+  silent = false
+  time = true
+
+[misc]
+  clean_on_exit = false

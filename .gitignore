@@ -1,4 +1,6 @@
 # 编译产物
+bin/
+tmp/
 auto-filter
 auto-filter.exe
 ai-photo-tool

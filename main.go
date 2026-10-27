@@ -17,12 +17,16 @@ import (
 	"image/png"
 	"log"
 	"net/http"
+	"os"
+	"runtime"
 	"strconv"
+	"time"
 
 	"ai-photo-tool/analyzer"
 	"ai-photo-tool/filters"
 
 	"github.com/josuedeavila/rmbg"
+	ort "github.com/yalue/onnxruntime_go"
 )
 
 // 全局抠图器：fast = 轻量版（快速），hd = 完整版（高清）
@@ -32,13 +36,39 @@ var removerHD *rmbg.RemBG
 // 全局滤镜列表（启动时加载一次）
 var presetFilters = filters.Presets()
 
+// 服务启动时间：air 重新编译重启后会变，前端靠它判断要不要刷新页面
+var startupTime = time.Now().Unix()
+
 // 命令行参数：端口和模型路径可配，不用改代码重新编译
 // 【JS→Go 差异】Node 服务常用 process.env 读环境变量，Go 标准库用 flag 包
 var (
-	addrFlag     = flag.String("addr", ":8080", "服务监听地址，例如 :8080 或 127.0.0.1:9000")
+	addrFlag      = flag.String("addr", ":8080", "服务监听地址，例如 :8080 或 127.0.0.1:9000")
 	fastModelFlag = flag.String("fast-model", "models/u2netp.onnx", "快速抠图 ONNX 模型路径")
 	hdModelFlag   = flag.String("hd-model", "models/u2net.onnx", "高清抠图 ONNX 模型路径")
 )
+
+// initORTLib 在第一次初始化抠图器之前，显式指定 onnxruntime 动态库路径。
+// 不设置的话 onnxruntime_go 只会去系统路径找，macOS 下必须靠 DYLD_LIBRARY_PATH。
+// 【JS→Go 差异】Node 的原生扩展(.node)放哪 require 哪；Go 的 cgo 动态库得在初始化前手动注册路径
+func initORTLib() {
+	var candidates []string
+	switch runtime.GOOS {
+	case "darwin":
+		candidates = []string{"libs/libonnxruntime.dylib", "libs/libonnxruntime.1.22.0.dylib"}
+	case "linux":
+		candidates = []string{"libs/libonnxruntime.so", "libs/libonnxruntime.1.22.0.so"}
+	case "windows":
+		candidates = []string{"libs/onnxruntime.dll"}
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			ort.SetSharedLibraryPath(p)
+			fmt.Printf("✅  ONNX 动态库: %s\n", p)
+			return
+		}
+	}
+	fmt.Println("ℹ️  未在 libs/ 找到 onnxruntime 动态库，回退系统路径（可用 DYLD_LIBRARY_PATH 指定）")
+}
 
 func initRemover(modelPath string) *rmbg.RemBG {
 	r, err := rmbg.New(&rmbg.Config{
@@ -55,6 +85,9 @@ func initRemover(modelPath string) *rmbg.RemBG {
 
 func main() {
 	flag.Parse()
+
+	// 必须在任何 rmbg.New() 之前调用，否则 ORT 环境已按系统路径初始化完就晚了
+	initORTLib()
 
 	// 加载两个抠图模型：轻量版 + 完整版
 	removerFast = initRemover(*fastModelFlag)
@@ -77,6 +110,7 @@ func main() {
 	http.HandleFunc("/api/apply", handleApply)
 	http.HandleFunc("/api/auto-enhance", handleAutoEnhance)
 	http.HandleFunc("/api/remove-bg", handleRemoveBg)
+	http.HandleFunc("/api/reload-check", handleReloadCheck)
 	http.Handle("/", http.FileServer(http.Dir("static")))
 
 	fmt.Printf("自动滤镜服务已启动: http://localhost%s\n", *addrFlag)
@@ -88,6 +122,22 @@ func main() {
 func handleListFilters(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(presetFilters)
+}
+
+// handleReloadCheck 开发模式下给前端轮询用：
+// 返回服务启动时间 + index.html 的修改时间，前端对比发现变了就自动刷新页面。
+// 改 .go 触发 air 重启 → startup 变；改 index.html → htmlMtime 变。
+func handleReloadCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	mtime := int64(0)
+	if fi, err := os.Stat("static/index.html"); err == nil {
+		mtime = fi.ModTime().Unix()
+	}
+	json.NewEncoder(w).Encode(map[string]int64{
+		"startup":   startupTime,
+		"htmlMtime": mtime,
+	})
 }
 
 // analyzeResponse 分析接口返回结构

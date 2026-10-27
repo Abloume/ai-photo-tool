@@ -12,21 +12,41 @@
 
 ## 启动
 
-```bash
-# macOS：onnxruntime 动态库在 libs/ 下，需要让运行时找到
-DYLD_LIBRARY_PATH=libs go run .
-# 然后浏览器打开 http://localhost:8080
-```
-
-可选参数：
+### 开发模式（热重载）
 
 ```bash
-DYLD_LIBRARY_PATH=libs go run . -addr :9000                  # 换端口
-DYLD_LIBRARY_PATH=libs go run . -fast-model models/u2netp.onnx # 指定快速抠图模型
-DYLD_LIBRARY_PATH=libs go run . -hd-model models/u2net.onnx     # 指定高清抠图模型
+make dev
+# 等价于 air：改 .go 自动编译重启后端
+# 改 static/index.html 或后端重启后，浏览器自动刷新（前端每 2s 轮询 /api/reload-check）
+# 浏览器打开 http://localhost:8080
 ```
 
-> 不带 `DYLD_LIBRARY_PATH=libs` 时，滤镜和优化功能仍可用，但抠图初始化会因找不到 onnxruntime 动态库而 panic。
+> 首次用需先装 air：`go install github.com/air-verse/air@latest`
+
+### 生产模式（单二进制）
+
+```bash
+make build          # 编译到 bin/ai-photo-tool
+./bin/ai-photo-tool # 直接跑，不带 Go 环境也能起
+```
+
+### 常用命令
+
+| 命令 | 作用 |
+|---|---|
+| `make dev` | 开发热重载（air） |
+| `make build` | 编译生产二进制到 `bin/` |
+| `make run` | 编译并直接运行 |
+| `make test` | 跑测试 |
+| `make clean` | 清理 `tmp/` 和 `bin/` |
+
+换端口等参数直接传给二进制：
+
+```bash
+./bin/ai-photo-tool -addr :9000
+```
+
+> 程序启动时会自动在 `libs/` 下找 onnxruntime 动态库并注册，不用再手动设 `DYLD_LIBRARY_PATH`。找不到时滤镜/优化仍可用，仅抠图不可用。
 
 ## 模型与依赖
 
@@ -47,8 +67,12 @@ main.go              # HTTP 服务入口、路由、抠图 handler
 filters/filters.go   # 滤镜参数定义 + 像素级 Apply（按行并行）
 analyzer/analyzer.go # 图片色彩统计 + 滤镜推荐打分
 static/index.html    # 单页前端
+Makefile             # 开发/生产入口（make dev / build / run / test）
+.air.toml           # air 热重载配置
 models/              # ONNX 模型（不入库）
 libs/                # onnxruntime 动态库
+bin/                 # 生产编译产物（不入库）
+tmp/                 # air 开发模式编译产物（不入库）
 scripts/             # 早期 Python 抠图脚本（已被 Go 原生实现取代，留作参考）
 ```
 
