@@ -15,3 +15,6 @@ libs/
 
 # Python 临时文件
 scripts/__pycache__/
+
+# 本地密钥（DeepSeek 等）
+.env

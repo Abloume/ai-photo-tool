@@ -125,6 +125,23 @@
         .batch-apply-btn:hover {
             background: #0066d6;
         }
+        .batch-apply-btn:disabled {
+            background: #c7c7cc;
+            cursor: default;
+        }
+        .batch-save-btn {
+            padding: 6px 14px;
+            border-radius: 8px;
+            border: none;
+            background: #34c759;
+            color: #fff;
+            font-size: 13px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .batch-save-btn:hover {
+            background: #2fb350;
+        }
         .thumbnail-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
@@ -165,6 +182,19 @@
             background: #007aff;
             color: #fff;
             border-color: #007aff;
+        }
+        .grid-item.processed::after {
+            content: '✓ 已处理';
+            position: absolute;
+            right: 4px;
+            bottom: 4px;
+            padding: 1px 5px;
+            border-radius: 4px;
+            background: rgba(52, 199, 89, 0.92);
+            color: #fff;
+            font-size: 10px;
+            line-height: 16px;
+            pointer-events: none;
         }
         .img-panel img {
             width: 100%;
@@ -436,6 +466,105 @@
             padding: 16px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         }
+
+        /* AI 建议区（导入后自动出现） */
+        .ai-suggest {
+            display: none;
+            background: linear-gradient(135deg, #f5f3ff 0%, #eef4ff 100%);
+            border: 1px solid #e3e8ff;
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 14px;
+        }
+        .ai-suggest-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .ai-suggest-title { font-size: 12px; font-weight: 600; color: #4b3fa8; }
+        .ai-suggest-source { font-size: 10px; color: #8e8e93; }
+        .ai-suggest-loading { font-size: 12px; color: #8e8e93; }
+        .ai-suggest-summary {
+            font-size: 12px;
+            color: #4b4b55;
+            line-height: 1.5;
+            margin-bottom: 10px;
+        }
+        .ai-tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
+        .ai-tag {
+            padding: 6px 10px;
+            border-radius: 14px;
+            border: 1px solid #d9defb;
+            background: #fff;
+            font-size: 12px;
+            color: #4b3fa8;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .ai-tag:hover { border-color: #7c6cf0; }
+        .ai-tag.active {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-color: transparent;
+            color: #fff;
+        }
+        .ai-prompt-card {
+            display: none;
+            margin-top: 10px;
+            background: #fff;
+            border-radius: 10px;
+            padding: 10px 12px;
+            border: 1px solid #ececf5;
+        }
+        .ai-prompt-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            color: #86868b;
+            margin-bottom: 6px;
+        }
+        .ai-copy-btn {
+            border: none;
+            background: #f0eefe;
+            color: #5b4de0;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .ai-copy-btn:hover { background: #e4dfff; }
+        .ai-prompt-text { font-size: 12px; line-height: 1.6; color: #1d1d1f; white-space: pre-wrap; }
+        .ai-prompt-reason { font-size: 11px; color: #8e8e93; margin-top: 6px; }
+        /* 图生图：拿提示词真出一张图 */
+        .ai-gen-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px dashed #ececf5;
+        }
+        .ai-gen-btn {
+            border: none;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: #fff;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 7px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .ai-gen-btn:disabled {
+            background: #c9c9d4;
+            cursor: not-allowed;
+        }
+        .ai-gen-hint { font-size: 10px; color: #a1a1aa; line-height: 1.4; }
+        .ai-gen-status { display: none; font-size: 11px; margin-top: 6px; line-height: 1.5; }
+        .ai-gen-status.loading { display: block; color: #8e8e93; }
+        .ai-gen-status.error { display: block; color: #d94848; }
+        .ai-gen-status.ok { display: block; color: #2f9e5f; }
 
         /* 功能标签切换 */
         .func-tabs {
@@ -735,6 +864,9 @@
                         <button class="batch-apply-btn" id="batchApplyBtn" style="margin-left:auto;">
                             ⚡ 应用到选中图片
                         </button>
+                        <button class="batch-save-btn" id="batchSaveAllBtn" style="display:none;">
+                            💾 保存全部
+                        </button>
                     </div>
                     <div class="thumbnail-grid" id="thumbnailGrid"></div>
                 </div>
@@ -742,6 +874,30 @@
 
             <!-- 右栏：功能面板 -->
             <div class="right-panel">
+                <!-- AI 建议（导入图片后自动出现，点标签出提示词 + 实时预览） -->
+                <div class="ai-suggest" id="aiSuggest">
+                    <div class="ai-suggest-head">
+                        <span class="ai-suggest-title">🤖 AI 分析</span>
+                        <span class="ai-suggest-source" id="aiSuggestSource"></span>
+                    </div>
+                    <div class="ai-suggest-loading" id="aiSuggestLoading">AI 正在分析画面…</div>
+                    <div class="ai-suggest-summary" id="aiSuggestSummary" style="display:none;"></div>
+                    <div class="ai-tag-row" id="aiTagRow"></div>
+                    <div class="ai-prompt-card" id="aiPromptCard">
+                        <div class="ai-prompt-head">
+                            <span id="aiPromptLabel">提示词</span>
+                            <button class="ai-copy-btn" id="aiCopyBtn">复制</button>
+                        </div>
+                        <div class="ai-prompt-text" id="aiPromptText"></div>
+                        <div class="ai-prompt-reason" id="aiPromptReason"></div>
+                        <div class="ai-gen-row">
+                            <button class="ai-gen-btn" id="aiGenBtn">🎨 AI 出图</button>
+                            <span class="ai-gen-hint" id="aiGenHint">用提示词生成新图<br>会改变画面细节</span>
+                        </div>
+                        <div class="ai-gen-status" id="aiGenStatus"></div>
+                    </div>
+                </div>
+
                 <!-- 功能标签切换 -->
                 <div class="func-tabs">
                     <button class="func-tab active" data-func="filters">🎨 滤镜</button>
@@ -892,6 +1048,7 @@
 
         let currentFile = null;
         let batchFiles = []; // 批量处理的文件列表
+        let batchResults = new Map(); // 批量处理结果：图片下标 -> { blob, url, filename }
         let currentMattingMode = 'recommend'; // 当前抠图模式：fast/hd/v2/recommend
         let currentFilterIdx = -1;
         let filters = [];
@@ -905,6 +1062,13 @@
             });
 
         // 上传交互
+        // 换一批图片时清空上一轮的批量处理结果
+        function resetBatchResults() {
+            batchResults.forEach(r => URL.revokeObjectURL(r.url));
+            batchResults.clear();
+            document.getElementById('batchSaveAllBtn').style.display = 'none';
+        }
+
         uploadZone.addEventListener('click', () => fileInput.click());
         uploadZone.addEventListener('dragover', e => {
             e.preventDefault();
@@ -916,6 +1080,7 @@
             uploadZone.classList.remove('dragover');
             const files = Array.from(e.dataTransfer.files);
             if (files.length === 0) return;
+            resetBatchResults();
             batchFiles = files;
             renderThumbnails();
             handleFile(files[0]);
@@ -923,6 +1088,7 @@
         fileInput.addEventListener('change', e => {
             const files = Array.from(e.target.files);
             if (files.length === 0) return;
+            resetBatchResults();
             batchFiles = files;
             renderThumbnails();
             handleFile(files[0]);
@@ -964,10 +1130,11 @@
                     }
                     updateBatchCount();
                     updateSelectAllState();
-                    // 主区域显示选中的第一张图
-                    if (selectedIndices.size > 0) {
-                        const firstSelected = Math.min(...selectedIndices);
-                        handleFile(batchFiles[firstSelected]);
+                    // 主区域显示刚点击的图片（未选中时回退到选中的第一张）
+                    if (selectedIndices.has(idx)) {
+                        handleFile(batchFiles[idx]);
+                    } else if (selectedIndices.size > 0) {
+                        handleFile(batchFiles[Math.min(...selectedIndices)]);
                     }
                 });
                 grid.appendChild(item);
@@ -980,8 +1147,10 @@
         let selectedIndices = new Set([0]);
 
         function updateBatchCount() {
+            const processed = batchResults.size;
             document.getElementById('batchCount').textContent =
-                `已选 ${selectedIndices.size} / ${batchFiles.length} 张`;
+                `已选 ${selectedIndices.size} / ${batchFiles.length} 张` +
+                (processed > 0 ? ` · 已处理 ${processed} 张` : '');
         }
 
         function updateSelectAllState() {
@@ -1004,20 +1173,29 @@
         });
 
         // 批量应用：对选中的图片应用当前选中的功能
+        // 处理完只更新预览，等用户点「保存全部」或「保存图片」再下载
         document.getElementById('batchApplyBtn').addEventListener('click', async () => {
             if (selectedIndices.size === 0) {
                 alert('请先选择图片');
                 return;
             }
+
+            const applyBtn = document.getElementById('batchApplyBtn');
+            const saveAllBtn = document.getElementById('batchSaveAllBtn');
+            applyBtn.disabled = true;
             processingOverlay.classList.add('active');
-            const files = Array.from(selectedIndices).map(i => batchFiles[i]);
-            const total = files.length;
+
+            const entries = Array.from(selectedIndices)
+                .sort((a, b) => a - b)
+                .map(i => ({ idx: i, file: batchFiles[i] }));
+            const total = entries.length;
 
             // 根据当前选中的功能标签，决定调用哪个接口
             const activeTab = document.querySelector('.func-tab.active').dataset.func;
+            let success = 0;
 
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
+            for (let i = 0; i < entries.length; i++) {
+                const { idx, file } = entries[i];
                 processingOverlay.querySelector('.processing-text').textContent =
                     `处理中 ${i + 1}/${total}: ${file.name}`;
 
@@ -1039,38 +1217,129 @@
                     } else if (activeTab === 'sr') {
                         url = '/api/super-resolve';
                     } else if (activeTab === 'filters' && currentFilterIdx >= 0) {
-                        url = `/api/apply?filter=${currentFilterIdx}&intensity=${intensitySlider.value}`;
+                        url = `/api/apply?index=${currentFilterIdx}&intensity=${intensitySlider.value}`;
                     }
 
                     const resp = await fetch(url, { method: 'POST', body: formData });
+                    if (!resp.ok) {
+                        throw new Error(`${resp.status} ${await resp.text()}`);
+                    }
                     const blob = await resp.blob();
 
-                    // 自动下载
-                    const a = document.createElement('a');
-                    a.href = URL.createObjectURL(blob);
-                    a.download = `edited_${file.name}`;
-                    a.click();
+                    // 只缓存预览，不自动下载
+                    const previous = batchResults.get(idx);
+                    if (previous) URL.revokeObjectURL(previous.url);
+
+                    const result = {
+                        blob,
+                        url: URL.createObjectURL(blob),
+                        filename: buildResultFilename(file.name, blob.type)
+                    };
+                    batchResults.set(idx, result);
+                    updateThumbnailResult(idx, result);
+                    success++;
                 } catch (err) {
                     console.error(`处理 ${file.name} 失败:`, err);
                 }
             }
 
+            applyBtn.disabled = false;
             processingOverlay.classList.remove('active');
-            alert(`批量处理完成！共处理 ${total} 张图片`);
+            updateBatchCount();
+
+            if (batchResults.size > 0) {
+                saveAllBtn.style.display = 'inline-block';
+                // 在对比区展示第一张处理结果，方便确认效果
+                showBatchResult(Math.min(...batchResults.keys()));
+            }
+
+            if (success === total) {
+                alert(`批量处理完成！共处理 ${total} 张图片，确认效果后点「保存全部」下载`);
+            } else {
+                alert(`批量处理完成：成功 ${success}/${total} 张，失败的图片请查看控制台`);
+            }
+        });
+
+        // 触发浏览器下载
+        function downloadResult(result) {
+            const a = document.createElement('a');
+            a.href = result.url;
+            a.download = result.filename;
+            a.click();
+        }
+
+        // 根据返回的 MIME 类型生成下载文件名（抠图结果是 PNG，其余是 JPEG）
+        function buildResultFilename(originalName, mime) {
+            const base = originalName.replace(/\.[^.]+$/, '');
+            const ext = mime === 'image/png' ? 'png' : 'jpg';
+            return `edited_${base}.${ext}`;
+        }
+
+        // 把处理结果写进缩略图（只预览，不下载）
+        function updateThumbnailResult(idx, result) {
+            const item = document.querySelector(`.grid-item[data-idx="${idx}"]`);
+            if (!item) return;
+            const img = item.querySelector('img');
+            if (img) img.src = result.url;
+            item.classList.add('processed');
+        }
+
+        // 批量处理后预览某张结果，不重置当前选择的功能/滤镜
+        function showBatchResult(idx) {
+            const result = batchResults.get(idx);
+            const file = batchFiles[idx];
+            if (!result || !file) return;
+
+            currentFile = file;
+            const reader = new FileReader();
+            reader.onload = e => {
+                originalImg.src = e.target.result;
+                filteredImg.src = result.url;
+                filteredLabel.textContent = '已应用效果';
+                mainLayout.style.display = 'grid';
+                document.querySelector('.compare-area').classList.add('active');
+                downloadBtn.classList.add('active');
+                downloadBtn.onclick = () => downloadResult(result);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // 保存全部：用户确认后再统一下载
+        document.getElementById('batchSaveAllBtn').addEventListener('click', () => {
+            if (batchResults.size === 0) return;
+            const indices = Array.from(batchResults.keys()).sort((a, b) => a - b);
+            indices.forEach((idx, i) => {
+                const result = batchResults.get(idx);
+                // 稍作间隔，避免浏览器把连续下载当成异常行为拦截
+                setTimeout(() => downloadResult(result), i * 200);
+            });
         });
 
         function handleFile(file) {
             currentFile = file;
-            currentFilterIdx = -1;
 
-            // 显示原图
+            const batchIdx = batchFiles.indexOf(file);
+            const result = batchIdx >= 0 ? batchResults.get(batchIdx) : null;
+            // 已批量处理的图片保留当前功能选择，方便继续批量应用
+            if (!result) {
+                currentFilterIdx = -1;
+            }
+
+            // 显示原图（有批量处理结果时右侧显示处理后的预览）
             const reader = new FileReader();
             reader.onload = e => {
                 originalImg.src = e.target.result;
-                filteredImg.src = e.target.result;
+                filteredImg.src = result ? result.url : e.target.result;
+                filteredLabel.textContent = result ? '已应用效果' : '效果';
                 mainLayout.style.display = 'grid';
                 document.querySelector('.compare-area').classList.add('active');
-                downloadBtn.classList.remove('active');
+                if (result) {
+                    downloadBtn.classList.add('active');
+                    downloadBtn.onclick = () => downloadResult(result);
+                } else {
+                    downloadBtn.classList.remove('active');
+                    downloadBtn.onclick = null;
+                }
             };
             reader.readAsDataURL(file);
 
@@ -1089,6 +1358,9 @@
                 .catch(err => {
                     loading.classList.remove('active');
                 });
+
+            // 同时请求 AI 建议：一句话概述 + 几个优化标签 + 每个标签的提示词
+            requestAISuggest(file);
         }
 
         // 渲染"为你推荐"：后端根据图片色彩特征算出来的 Top3
@@ -1120,6 +1392,227 @@
             });
 
             section.style.display = recommendRow.children.length ? 'block' : 'none';
+        }
+
+        // ---- AI 建议：导入图片后自动分析，点标签出提示词并预览 ----
+        const aiSuggestionCache = new WeakMap(); // 同一张图不重复请求大模型
+        let aiSuggestSeq = 0;
+        let currentAITags = [];
+
+        function requestAISuggest(file) {
+            const box = document.getElementById('aiSuggest');
+            const loadingEl = document.getElementById('aiSuggestLoading');
+            const summaryEl = document.getElementById('aiSuggestSummary');
+            const row = document.getElementById('aiTagRow');
+            const promptCard = document.getElementById('aiPromptCard');
+
+            box.style.display = 'block';
+            promptCard.style.display = 'none';
+            summaryEl.style.display = 'none';
+
+            const cached = aiSuggestionCache.get(file);
+            if (cached) {
+                renderAISuggest(cached);
+                return;
+            }
+
+            const seq = ++aiSuggestSeq;
+            row.innerHTML = '';
+            loadingEl.style.display = 'block';
+            loadingEl.textContent = 'AI 正在分析画面…';
+
+            const formData = new FormData();
+            formData.append('image', file);
+            fetch('/api/ai-suggest', { method: 'POST', body: formData })
+                .then(r => {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                })
+                .then(data => {
+                    if (seq !== aiSuggestSeq) return; // 用户已经换图，丢弃旧结果
+                    aiSuggestionCache.set(file, data);
+                    renderAISuggest(data);
+                })
+                .catch(err => {
+                    if (seq !== aiSuggestSeq) return;
+                    loadingEl.textContent = 'AI 建议暂不可用：' + err.message;
+                });
+        }
+
+        function renderAISuggest(data) {
+            const loadingEl = document.getElementById('aiSuggestLoading');
+            const summaryEl = document.getElementById('aiSuggestSummary');
+            const row = document.getElementById('aiTagRow');
+            const promptCard = document.getElementById('aiPromptCard');
+
+            loadingEl.style.display = 'none';
+            document.getElementById('aiSuggestSource').textContent =
+                data.source === 'deepseek' ? (data.model || 'DeepSeek') : '离线规则';
+
+            summaryEl.textContent = data.summary || '';
+            summaryEl.style.display = data.summary ? 'block' : 'none';
+
+            row.innerHTML = '';
+            promptCard.style.display = 'none';
+            currentAITags = data.tags || [];
+            updateGenAvailability(data.imageGen);
+
+            currentAITags.forEach(tag => {
+                const btn = document.createElement('button');
+                btn.className = 'ai-tag';
+                btn.textContent = tag.label;
+                btn.title = tag.reason || '';
+                btn.addEventListener('click', () => {
+                    row.querySelectorAll('.ai-tag').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    showAIPrompt(tag);
+                    applyCustomFilter(tag.filter, tag.label);
+                });
+                row.appendChild(btn);
+            });
+        }
+
+        function showAIPrompt(tag) {
+            document.getElementById('aiPromptCard').style.display = 'block';
+            document.getElementById('aiPromptLabel').textContent = '提示词 · ' + tag.label;
+            document.getElementById('aiPromptText').textContent = tag.prompt || '';
+            document.getElementById('aiPromptReason').textContent =
+                tag.reason ? '依据：' + tag.reason : '';
+            const status = document.getElementById('aiGenStatus');
+            status.className = 'ai-gen-status';
+            status.textContent = '';
+        }
+
+        // ---- 图生图：拿当前提示词真出一张图（会重绘细节，和本地调色不同） ----
+        let genReady = false;
+
+        function updateGenAvailability(info) {
+            genReady = !!(info && info.enabled);
+            const btn = document.getElementById('aiGenBtn');
+            const hint = document.getElementById('aiGenHint');
+            btn.disabled = !genReady;
+            if (genReady) {
+                btn.title = '图像模型: ' + (info.model || '');
+                hint.innerHTML = '用提示词生成新图<br>会改变画面细节';
+            } else {
+                btn.title = '未配置图像模型';
+                hint.innerHTML = '未配置图像模型<br>设置 AI_IMAGE_MODEL 开启';
+            }
+        }
+
+        async function generateWithAI() {
+            if (!currentFile || !genReady) return;
+            const prompt = document.getElementById('aiPromptText').textContent.trim();
+            if (!prompt) return;
+
+            const btn = document.getElementById('aiGenBtn');
+            const status = document.getElementById('aiGenStatus');
+            btn.disabled = true;
+            btn.textContent = '生成中…';
+            status.className = 'ai-gen-status loading';
+            status.textContent = 'AI 正在重绘，通常 10–30 秒，期间请勿关闭页面…';
+
+            const formData = new FormData();
+            formData.append('image', currentFile);
+            formData.append('prompt', prompt);
+
+            try {
+                const resp = await fetch('/api/ai-generate', { method: 'POST', body: formData });
+                if (!resp.ok) {
+                    let msg = 'HTTP ' + resp.status;
+                    try {
+                        const data = await resp.json();
+                        if (data.error) msg = data.error;
+                    } catch (e) { /* 非 JSON 错误就保留状态码 */ }
+                    throw new Error(msg);
+                }
+                const blob = await resp.blob();
+                const label = document.getElementById('aiPromptLabel').textContent
+                    .replace('提示词 · ', '').trim();
+                currentFilterIdx = -1;
+                document.querySelectorAll('.filter-card-compact').forEach(c => c.classList.remove('active'));
+                document.getElementById('intensityPanel').style.display = 'none';
+                showResultBlob(blob, 'AI 生成 · ' + label, 'png');
+                status.className = 'ai-gen-status ok';
+                status.textContent = '已生成，可拖对比条看前后差异，或直接下载';
+            } catch (err) {
+                status.className = 'ai-gen-status error';
+                status.textContent = '出图失败：' + err.message;
+            } finally {
+                btn.disabled = !genReady;
+                btn.textContent = '🎨 AI 出图';
+            }
+        }
+
+        document.getElementById('aiGenBtn').addEventListener('click', generateWithAI);
+
+        // 把结果图挂到右侧预览并接管下载按钮
+        function showResultBlob(blob, label, fallbackExt) {
+            const url = URL.createObjectURL(blob);
+            filteredImg.src = url;
+            filteredLabel.textContent = label;
+            downloadBtn.classList.add('active');
+            processingOverlay.classList.remove('active');
+
+            let ext = fallbackExt || 'png';
+            if (blob.type && blob.type.indexOf('/') > -1) ext = blob.type.split('/')[1];
+            if (ext === 'jpeg') ext = 'jpg';
+
+            downloadBtn.onclick = () => {
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `ai_${(label || 'result').replace(/[\\/:*?"<>|\s]+/g, '_')}.${ext}`;
+                a.click();
+            };
+            return url;
+        }
+
+        document.getElementById('aiCopyBtn').addEventListener('click', () => {
+            const text = document.getElementById('aiPromptText').textContent;
+            if (!text) return;
+            const done = () => {
+                const btn = document.getElementById('aiCopyBtn');
+                btn.textContent = '已复制';
+                setTimeout(() => { btn.textContent = '复制'; }, 1500);
+            };
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(done).catch(done);
+            } else {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                done();
+            }
+        });
+
+        // 用自定义参数应用滤镜（AI 标签 / 提示词对应的本地效果）
+        function applyCustomFilter(filter, label) {
+            if (!currentFile) return;
+            currentFilterIdx = -1;
+            filteredLabel.textContent = label || 'AI 效果';
+            document.querySelectorAll('.filter-card-compact').forEach(c => c.classList.remove('active'));
+            document.getElementById('intensityPanel').style.display = 'none';
+            processingOverlay.classList.add('active');
+
+            const formData = new FormData();
+            formData.append('image', currentFile);
+            formData.append('filter', JSON.stringify(filter));
+
+            fetch('/api/apply-custom', { method: 'POST', body: formData })
+                .then(r => {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.blob();
+                })
+                .then(blob => {
+                    showResultBlob(blob, label || 'AI 效果', 'jpg');
+                })
+                .catch(err => {
+                    processingOverlay.classList.remove('active');
+                    alert('应用 AI 效果失败: ' + err.message);
+                });
         }
 
         function renderFilterLibrary() {

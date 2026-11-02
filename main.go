@@ -16,13 +16,16 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
+	"ai-photo-tool/ai"
 	"ai-photo-tool/analyzer"
 	"ai-photo-tool/autocompose"
 	"ai-photo-tool/filters"
@@ -61,6 +64,12 @@ var activeRemover BackgroundRemover
 
 // 超分器（Real-ESRGAN）
 var sr *superresolution.SuperResolution
+
+// 大模型客户端（DeepSeek / 兼容 OpenAI 协议），没配密钥时走离线规则建议
+var aiClient *ai.Client
+
+// 图生图客户端（OpenAI 兼容 /images/edits），没配 AI_IMAGE_MODEL 时该功能不可用
+var imageGen *ai.ImageGen
 
 // 全局滤镜列表（启动时加载一次）
 var presetFilters = filters.Presets()
@@ -115,6 +124,31 @@ func initRemover(modelPath string) *rmbg.RemBG {
 func main() {
 	flag.Parse()
 
+	// 本地开发时把 .env 里的 DEEPSEEK_API_KEY 等配置读进环境变量
+	ai.LoadDotEnv(".env")
+	aiClient = ai.NewClient(ai.ConfigFromEnv())
+	if aiClient.Enabled() {
+		if vm := aiClient.VisionModel(); vm != "" {
+			fmt.Printf("✅  AI 建议已接入大模型: %s（看图模型: %s）\n", aiClient.Model(), vm)
+		} else {
+			fmt.Printf("✅  AI 建议已接入大模型: %s（该模型不支持图片输入，只发量化特征）\n", aiClient.Model())
+		}
+	} else {
+		fmt.Println("ℹ️  未配置 DEEPSEEK_API_KEY，AI 建议走离线规则（标签和提示词仍可用）")
+	}
+
+	// 图生图：独立配置，缺 AI_IMAGE_MODEL 就当没这个功能（网关不一定有图像渠道）
+	imageGen = ai.NewImageGen(ai.ImageGenFromEnv())
+	if imageGen.Enabled() {
+		mode := "图生图"
+		if !imageGen.IsEdit() {
+			mode = "文生图"
+		}
+		fmt.Printf("✅  AI 出图已接入: %s（%s）\n", imageGen.Model(), mode)
+	} else {
+		fmt.Println("ℹ️  未配置 AI_IMAGE_MODEL，AI 出图不可用（只生成提示词）")
+	}
+
 	// 必须在任何 rmbg.New() 之前调用，否则 ORT 环境已按系统路径初始化完就晚了
 	initORTLib()
 
@@ -159,7 +193,10 @@ func main() {
 	// 【JS→Go 差异】Express 里 app.Use 中间件链，Go 是每个 handler 独立注册
 	http.HandleFunc("/api/filters", handleListFilters)
 	http.HandleFunc("/api/analyze", handleAnalyze)
+	http.HandleFunc("/api/ai-suggest", handleAISuggest)
+	http.HandleFunc("/api/ai-generate", handleAIGenerate)
 	http.HandleFunc("/api/apply", handleApply)
+	http.HandleFunc("/api/apply-custom", handleApplyCustom)
 	http.HandleFunc("/api/auto-enhance", handleAutoEnhance)
 	http.HandleFunc("/api/remove-bg", handleRemoveBg)
 	http.HandleFunc("/api/recommend-matting", handleRecommendMatting)
@@ -239,6 +276,170 @@ func handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// handleAISuggest 导入图片后自动分析：返回画面概述 + 若干优化标签，
+// 每个标签自带提示词和可本地执行的滤镜参数。
+func handleAISuggest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+
+	file, _, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "读取图片失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		http.Error(w, "解码图片失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// 特征提取是本地像素计算，很快；模型能看图时才额外编码缩略图。
+	// 单图 token 上限约 1024（约 1300×1300），1024 长边既够判断场景也不浪费额度。
+	feats := analyzer.Describe(img)
+	dataURL := ""
+	if aiClient != nil && aiClient.VisionEnabled() {
+		if du, err := ai.ImageDataURL(img, 1024); err == nil {
+			dataURL = du
+		}
+	}
+
+	sug := ai.Generate(r.Context(), aiClient, feats, dataURL)
+
+	// 顺带告诉前端图生图能不能用，按钮该不该亮，避免点了才报错
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(struct {
+		ai.Suggestion
+		ImageGen imageGenInfo `json:"imageGen"`
+	}{
+		Suggestion: sug,
+		ImageGen: imageGenInfo{
+			Enabled: imageGen.Enabled(),
+			Model:   imageGen.Model(),
+			Edit:    imageGen.IsEdit(),
+		},
+	})
+}
+
+// imageGenInfo 前端用来决定「AI 出图」按钮的可用状态
+type imageGenInfo struct {
+	Enabled bool   `json:"enabled"`
+	Model   string `json:"model,omitempty"`
+	Edit    bool   `json:"edit"` // true=图生图（带参考图），false=纯文生图
+}
+
+// writeJSONError 前端要按 JSON 读错误信息，不能用 http.Error 的纯文本
+func writeJSONError(w http.ResponseWriter, msg string, code int) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// handleAIGenerate 拿提示词真出一张图（图生图，OpenAI 兼容 /images/edits）。
+// form 字段：image=参考图，prompt=提示词。返回图片二进制，失败返回 {"error": "..."}。
+// 注意：这是生成式重绘，会改变细节，和 /api/apply-custom 的调色不是一回事。
+func handleAIGenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	if imageGen == nil || !imageGen.Enabled() {
+		writeJSONError(w, "未配置图像模型：设置 AI_IMAGE_MODEL / AI_IMAGE_API_KEY 后重启（当前只能生成提示词）", http.StatusServiceUnavailable)
+		return
+	}
+
+	prompt := strings.TrimSpace(r.FormValue("prompt"))
+	if prompt == "" {
+		writeJSONError(w, "缺少 prompt 参数", http.StatusBadRequest)
+		return
+	}
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeJSONError(w, "解析表单失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var (
+		imgBytes []byte
+		filename string
+	)
+	if file, header, err := r.FormFile("image"); err == nil {
+		defer file.Close()
+		data, err := io.ReadAll(io.LimitReader(file, 24<<20))
+		if err != nil {
+			writeJSONError(w, "读取图片失败: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		imgBytes = data
+		filename = header.Filename
+	} else if imageGen.IsEdit() {
+		writeJSONError(w, "图生图需要 image 参数", http.StatusBadRequest)
+		return
+	}
+
+	// 参考图必须能解码，否则网关侧报错更难排查
+	if len(imgBytes) > 0 {
+		if _, _, err := image.Decode(bytes.NewReader(imgBytes)); err != nil {
+			writeJSONError(w, "参考图无法解码: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	out, mime, err := imageGen.Generate(r.Context(), imgBytes, filename, prompt)
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	w.Header().Set("Content-Type", mime)
+	w.Header().Set("Content-Length", strconv.Itoa(len(out)))
+	w.Header().Set("X-AI-Image-Model", imageGen.Model())
+	w.Write(out)
+}
+
+// handleApplyCustom 用表单里的自定义参数应用滤镜（AI 建议标签点一下就走这里）
+// form 字段：image=图片文件，filter=滤镜参数 JSON
+func handleApplyCustom(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+
+	filterJSON := r.FormValue("filter")
+	if filterJSON == "" {
+		http.Error(w, "缺少 filter 参数", http.StatusBadRequest)
+		return
+	}
+	var f filters.Filter
+	if err := json.Unmarshal([]byte(filterJSON), &f); err != nil {
+		http.Error(w, "filter 参数不是合法 JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	f = ai.SanitizeFilter(f)
+
+	file, _, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "读取图片失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		http.Error(w, "解码图片失败: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	result := filters.Apply(img, f)
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	var buf bytes.Buffer
+	jpeg.Encode(&buf, result, &jpeg.Options{Quality: 90})
+	w.Write(buf.Bytes())
+}
+
 // handleApply 应用指定滤镜，返回处理后的图片
 // query 参数：index=滤镜序号
 func handleApply(w http.ResponseWriter, r *http.Request) {
@@ -290,7 +491,7 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 	jpeg.Encode(&buf, result, &jpeg.Options{Quality: 85})
 	w.Write(buf.Bytes())
 
-	_ = format // format 记录下来但不用，因为统一输出 jpeg
+	_ = format     // format 记录下来但不用，因为统一输出 jpeg
 	_ = png.Encode // 防止 import 未使用报错（如果以后加 png 输出）
 }
 
